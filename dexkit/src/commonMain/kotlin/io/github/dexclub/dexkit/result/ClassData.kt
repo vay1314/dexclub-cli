@@ -9,4 +9,6 @@ data class ClassData(
     val simpleName: String,
     val sourceFile: String,
     val modifiers: Int,
+    val id: Int = -1,
+    val dexId: Int = -1,
 )

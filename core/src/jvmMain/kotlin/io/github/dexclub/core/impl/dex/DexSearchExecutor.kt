@@ -13,7 +13,7 @@ import io.github.dexclub.dexkit.query.FindClass
 import io.github.dexclub.dexkit.query.FindField
 import io.github.dexclub.dexkit.query.FindMethod
 
-internal interface DexSearchExecutor {
+internal interface DexSearchExecutor : AutoCloseable {
     fun findClasses(
         workspace: WorkspaceContext,
         inventory: MaterialInventory,
@@ -49,4 +49,6 @@ internal interface DexSearchExecutor {
         inventory: MaterialInventory,
         request: InspectMethodRequest,
     ): MethodDetail
+
+    override fun close() = Unit
 }

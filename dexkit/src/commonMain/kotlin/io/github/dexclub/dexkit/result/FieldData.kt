@@ -9,4 +9,6 @@ data class FieldData(
     val className: String,
     val typeName: String,
     val modifiers: Int,
+    val id: Int = -1,
+    val dexId: Int = -1,
 )

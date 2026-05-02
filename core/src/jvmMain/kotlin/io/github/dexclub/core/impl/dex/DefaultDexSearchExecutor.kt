@@ -38,6 +38,8 @@ import java.util.zip.ZipFile
 internal class DefaultDexSearchExecutor(
     private val store: WorkspaceStore,
 ) : DexSearchExecutor {
+    private val targetContextLock = Any()
+    private var cachedTargetDexContext: CachedTargetDexContext? = null
 
     override fun findClasses(
         workspace: WorkspaceContext,
@@ -46,25 +48,10 @@ internal class DefaultDexSearchExecutor(
     ): List<ClassHit> {
         ensureDexKitLoaded()
         val workdirPath = Paths.get(workspace.workdir)
-        val hits = mutableListOf<ClassHit>()
-
-        for (apkPath in inventory.apkFiles) {
-            val apkHits = findClassesInApk(workspace, workdirPath, apkPath, query)
-            hits += apkHits
-            if (query.findFirst && apkHits.isNotEmpty()) {
-                return listOf(apkHits.first())
-            }
+        return withTargetDexContext(workspace, workdirPath, inventory) { context ->
+            val hits = context.bridge.findClass(query).map { result -> context.toClassHit(result) }
+            if (query.findFirst) hits.firstOrNull()?.let(::listOf).orEmpty() else hits
         }
-
-        for (dexPath in inventory.dexFiles) {
-            val dexHits = findClassesInDexFile(workdirPath, dexPath, query)
-            hits += dexHits
-            if (query.findFirst && dexHits.isNotEmpty()) {
-                return listOf(dexHits.first())
-            }
-        }
-
-        return hits
     }
 
     override fun findMethods(
@@ -74,25 +61,13 @@ internal class DefaultDexSearchExecutor(
     ): List<MethodHit> {
         ensureDexKitLoaded()
         val workdirPath = Paths.get(workspace.workdir)
-        val hits = mutableListOf<MethodHit>()
-
-        for (apkPath in inventory.apkFiles) {
-            val apkHits = findMethodsInApk(workspace, workdirPath, apkPath, query)
-            hits += apkHits
-            if (query.findFirst && apkHits.isNotEmpty()) {
-                return listOf(apkHits.first())
+        return withTargetDexContext(workspace, workdirPath, inventory) { context ->
+            val hits = context.bridge.findMethod(query).map { result ->
+                val source = context.resolveSource(result.dexId)
+                result.toMethodHit(source?.sourcePath, source?.sourceEntry)
             }
+            if (query.findFirst) hits.firstOrNull()?.let(::listOf).orEmpty() else hits
         }
-
-        for (dexPath in inventory.dexFiles) {
-            val dexHits = findMethodsInDexFile(workdirPath, dexPath, query)
-            hits += dexHits
-            if (query.findFirst && dexHits.isNotEmpty()) {
-                return listOf(dexHits.first())
-            }
-        }
-
-        return hits
     }
 
     override fun findFields(
@@ -102,25 +77,13 @@ internal class DefaultDexSearchExecutor(
     ): List<FieldHit> {
         ensureDexKitLoaded()
         val workdirPath = Paths.get(workspace.workdir)
-        val hits = mutableListOf<FieldHit>()
-
-        for (apkPath in inventory.apkFiles) {
-            val apkHits = findFieldsInApk(workspace, workdirPath, apkPath, query)
-            hits += apkHits
-            if (query.findFirst && apkHits.isNotEmpty()) {
-                return listOf(apkHits.first())
+        return withTargetDexContext(workspace, workdirPath, inventory) { context ->
+            val classSourceCache = mutableMapOf<String, MemberSource?>()
+            val hits = context.bridge.findField(query).map { result ->
+                result.toResolvedFieldHit(context, classSourceCache)
             }
+            if (query.findFirst) hits.firstOrNull()?.let(::listOf).orEmpty() else hits
         }
-
-        for (dexPath in inventory.dexFiles) {
-            val dexHits = findFieldsInDexFile(workdirPath, dexPath, query)
-            hits += dexHits
-            if (query.findFirst && dexHits.isNotEmpty()) {
-                return listOf(dexHits.first())
-            }
-        }
-
-        return hits
     }
 
     override fun findClassesUsingStrings(
@@ -130,17 +93,15 @@ internal class DefaultDexSearchExecutor(
     ): List<ClassHit> {
         ensureDexKitLoaded()
         val workdirPath = Paths.get(workspace.workdir)
-        val hits = mutableListOf<ClassHit>()
-
-        for (apkPath in inventory.apkFiles) {
-            hits += findClassesUsingStringsInApk(workspace, workdirPath, apkPath, query)
+        return withTargetDexContext(workspace, workdirPath, inventory) { context ->
+            context.bridge.batchFindClassUsingStrings(query)
+                .values
+                .asSequence()
+                .flatten()
+                .map { result -> context.toClassHit(result) }
+                .distinct()
+                .toList()
         }
-
-        for (dexPath in inventory.dexFiles) {
-            hits += findClassesUsingStringsInDexFile(workdirPath, dexPath, query)
-        }
-
-        return hits.distinct()
     }
 
     override fun findMethodsUsingStrings(
@@ -150,17 +111,18 @@ internal class DefaultDexSearchExecutor(
     ): List<MethodHit> {
         ensureDexKitLoaded()
         val workdirPath = Paths.get(workspace.workdir)
-        val hits = mutableListOf<MethodHit>()
-
-        for (apkPath in inventory.apkFiles) {
-            hits += findMethodsUsingStringsInApk(workspace, workdirPath, apkPath, query)
+        return withTargetDexContext(workspace, workdirPath, inventory) { context ->
+            val classSourceCache = mutableMapOf<String, MemberSource?>()
+            context.bridge.batchFindMethodUsingStrings(query)
+                .values
+                .asSequence()
+                .flatten()
+                .map { result ->
+                    result.toResolvedMethodHit(context, classSourceCache)
+                }
+                .distinct()
+                .toList()
         }
-
-        for (dexPath in inventory.dexFiles) {
-            hits += findMethodsUsingStringsInDexFile(workdirPath, dexPath, query)
-        }
-
-        return hits.distinct()
     }
 
     override fun inspectMethod(
@@ -172,357 +134,45 @@ internal class DefaultDexSearchExecutor(
         val descriptor = request.descriptor.trim()
         validateMethodDescriptor(descriptor)
         val workdirPath = Paths.get(workspace.workdir)
-        val matches = mutableListOf<LocatedMethod>()
+        return withTargetDexContext(workspace, workdirPath, inventory) { context ->
+            val locatedMethod = resolveUniqueLocatedMethod(context, descriptor)
+            val classSourceCache = mutableMapOf<String, MemberSource?>()
+            val callers = request.includes.takeIf { MethodDetailSection.Callers in it }?.let {
+                findMethodCallers(context, locatedMethod.method)
+            }
 
-        for (apkPath in inventory.apkFiles) {
-            matches += locateMethodInApk(workspace, workdirPath, apkPath, descriptor)
-        }
-
-        for (dexPath in inventory.dexFiles) {
-            locateMethodInDexFile(workdirPath, dexPath, descriptor)?.let(matches::add)
-        }
-
-        val locatedMethod = when (matches.size) {
-            1 -> matches.single()
-            0 -> throw DexInspectError(
-                reason = DexInspectErrorReason.MethodNotFound,
-                message = "method not found: $descriptor",
-            )
-            else -> throw DexInspectError(
-                reason = DexInspectErrorReason.AmbiguousMethod,
-                message = "method resolves to multiple dex sources and inspect-method requires a unique descriptor within the workspace: $descriptor",
+            loadMethodDetail(
+                context = context,
+                locatedMethod = locatedMethod,
+                includes = request.includes,
+                classSourceCache = classSourceCache,
+                callers = callers,
             )
         }
-
-        val classSourceCache = mutableMapOf<String, MemberSource?>()
-        val callers = request.includes.takeIf { MethodDetailSection.Callers in it }?.let {
-            findMethodCallers(
-                workspace = workspace,
-                inventory = inventory,
-                method = locatedMethod.method,
-            )
-        }
-
-        return loadMethodDetail(
-            workspace = workspace,
-            workdirPath = workdirPath,
-            inventory = inventory,
-            locatedMethod = locatedMethod,
-            includes = request.includes,
-            classSourceCache = classSourceCache,
-            callers = callers,
-        )
     }
-
-    private fun findClassesInApk(
-        workspace: WorkspaceContext,
-        workdirPath: Path,
-        relativeApkPath: String,
-        query: FindClass,
-    ): List<ClassHit> {
-        val hits = mutableListOf<ClassHit>()
-        for ((entryName, dexPath) in prepareApkDexFiles(workspace, workdirPath, relativeApkPath)) {
-            val entryHits = DexKitBridge(listOf(dexPath.toString())).useFindClass(query) { results ->
-                results.map { result ->
-                    ClassHit(
-                        className = result.descriptor,
-                        sourcePath = relativeApkPath,
-                        sourceEntry = entryName,
-                    )
-                }
-            }
-            hits += entryHits
-            if (query.findFirst && entryHits.isNotEmpty()) {
-                return listOf(entryHits.first())
-            }
-        }
-        return hits
-    }
-
-    private fun findClassesInDexFile(
-        workdirPath: Path,
-        relativeDexPath: String,
-        query: FindClass,
-    ): List<ClassHit> {
-        val dexPath = workdirPath.resolve(relativeDexPath).normalize().toString()
-        return DexKitBridge(listOf(dexPath)).useFindClass(query) { results ->
-            results.map { result ->
-                ClassHit(
-                    className = result.descriptor,
-                    sourcePath = relativeDexPath,
-                    sourceEntry = null,
-                )
-            }
-        }
-    }
-
-    private fun findMethodsInApk(
-        workspace: WorkspaceContext,
-        workdirPath: Path,
-        relativeApkPath: String,
-        query: FindMethod,
-    ): List<MethodHit> {
-        val hits = mutableListOf<MethodHit>()
-        for ((entryName, dexPath) in prepareApkDexFiles(workspace, workdirPath, relativeApkPath)) {
-            val entryHits = DexKitBridge(listOf(dexPath.toString())).useFindMethod(query) { results ->
-                results.map { result ->
-                    MethodHit(
-                        className = result.className,
-                        methodName = result.name,
-                        descriptor = result.descriptor,
-                        sourcePath = relativeApkPath,
-                        sourceEntry = entryName,
-                    )
-                }
-            }
-            hits += entryHits
-            if (query.findFirst && entryHits.isNotEmpty()) {
-                return listOf(entryHits.first())
-            }
-        }
-        return hits
-    }
-
-    private fun findMethodsInDexFile(
-        workdirPath: Path,
-        relativeDexPath: String,
-        query: FindMethod,
-    ): List<MethodHit> {
-        val dexPath = workdirPath.resolve(relativeDexPath).normalize().toString()
-        return DexKitBridge(listOf(dexPath)).useFindMethod(query) { results ->
-            results.map { result ->
-                MethodHit(
-                    className = result.className,
-                    methodName = result.name,
-                    descriptor = result.descriptor,
-                    sourcePath = relativeDexPath,
-                    sourceEntry = null,
-                )
-            }
-        }
-    }
-
-    private fun findFieldsInApk(
-        workspace: WorkspaceContext,
-        workdirPath: Path,
-        relativeApkPath: String,
-        query: FindField,
-    ): List<FieldHit> {
-        val hits = mutableListOf<FieldHit>()
-        for ((entryName, dexPath) in prepareApkDexFiles(workspace, workdirPath, relativeApkPath)) {
-            val entryHits = DexKitBridge(listOf(dexPath.toString())).useFindField(query) { results ->
-                results.map { result ->
-                    FieldHit(
-                        className = result.className,
-                        fieldName = result.name,
-                        descriptor = result.descriptor,
-                        sourcePath = relativeApkPath,
-                        sourceEntry = entryName,
-                    )
-                }
-            }
-            hits += entryHits
-            if (query.findFirst && entryHits.isNotEmpty()) {
-                return listOf(entryHits.first())
-            }
-        }
-        return hits
-    }
-
-    private fun findFieldsInDexFile(
-        workdirPath: Path,
-        relativeDexPath: String,
-        query: FindField,
-    ): List<FieldHit> {
-        val dexPath = workdirPath.resolve(relativeDexPath).normalize().toString()
-        return DexKitBridge(listOf(dexPath)).useFindField(query) { results ->
-            results.map { result ->
-                FieldHit(
-                    className = result.className,
-                    fieldName = result.name,
-                    descriptor = result.descriptor,
-                    sourcePath = relativeDexPath,
-                    sourceEntry = null,
-                )
-            }
-        }
-    }
-
-    private fun findClassesUsingStringsInApk(
-        workspace: WorkspaceContext,
-        workdirPath: Path,
-        relativeApkPath: String,
-        query: BatchFindClassUsingStrings,
-    ): List<ClassHit> {
-        val hits = mutableListOf<ClassHit>()
-        for ((entryName, dexPath) in prepareApkDexFiles(workspace, workdirPath, relativeApkPath)) {
-            val entryHits = DexKitBridge(listOf(dexPath.toString())).useBatchFindClassUsingStrings(query) { results ->
-                results.values.asSequence()
-                    .flatten()
-                    .map { result ->
-                        ClassHit(
-                            className = result.descriptor,
-                            sourcePath = relativeApkPath,
-                            sourceEntry = entryName,
-                        )
-                    }
-                    .distinct()
-                    .toList()
-            }
-            hits += entryHits
-        }
-        return hits
-    }
-
-    private fun findClassesUsingStringsInDexFile(
-        workdirPath: Path,
-        relativeDexPath: String,
-        query: BatchFindClassUsingStrings,
-    ): List<ClassHit> {
-        val dexPath = workdirPath.resolve(relativeDexPath).normalize().toString()
-        return DexKitBridge(listOf(dexPath)).useBatchFindClassUsingStrings(query) { results ->
-            results.values.asSequence()
-                .flatten()
-                .map { result ->
-                    ClassHit(
-                        className = result.descriptor,
-                        sourcePath = relativeDexPath,
-                        sourceEntry = null,
-                    )
-                }
-                .distinct()
-                .toList()
-        }
-    }
-
-    private fun findMethodsUsingStringsInApk(
-        workspace: WorkspaceContext,
-        workdirPath: Path,
-        relativeApkPath: String,
-        query: BatchFindMethodUsingStrings,
-    ): List<MethodHit> {
-        val hits = mutableListOf<MethodHit>()
-        for ((entryName, dexPath) in prepareApkDexFiles(workspace, workdirPath, relativeApkPath)) {
-            val entryHits = DexKitBridge(listOf(dexPath.toString())).useBatchFindMethodUsingStrings(query) { results ->
-                results.values.asSequence()
-                    .flatten()
-                    .map { result ->
-                        MethodHit(
-                            className = result.className,
-                            methodName = result.name,
-                            descriptor = result.descriptor,
-                            sourcePath = relativeApkPath,
-                            sourceEntry = entryName,
-                        )
-                    }
-                    .distinct()
-                    .toList()
-            }
-            hits += entryHits
-        }
-        return hits
-    }
-
-    private fun findMethodsUsingStringsInDexFile(
-        workdirPath: Path,
-        relativeDexPath: String,
-        query: BatchFindMethodUsingStrings,
-    ): List<MethodHit> {
-        val dexPath = workdirPath.resolve(relativeDexPath).normalize().toString()
-        return DexKitBridge(listOf(dexPath)).useBatchFindMethodUsingStrings(query) { results ->
-            results.values.asSequence()
-                .flatten()
-                .map { result ->
-                    MethodHit(
-                        className = result.className,
-                        methodName = result.name,
-                        descriptor = result.descriptor,
-                        sourcePath = relativeDexPath,
-                        sourceEntry = null,
-                    )
-                }
-                .distinct()
-                .toList()
-        }
-    }
-
-    private fun locateMethodInApk(
-        workspace: WorkspaceContext,
-        workdirPath: Path,
-        relativeApkPath: String,
-        descriptor: String,
-    ): List<LocatedMethod> {
-        val matches = mutableListOf<LocatedMethod>()
-        for ((entryName, dexPath) in prepareApkDexFiles(workspace, workdirPath, relativeApkPath)) {
-            locateMethodInBridge(
-                bridge = DexKitBridge(listOf(dexPath.toString())),
-                descriptor = descriptor,
-                sourcePath = relativeApkPath,
-                sourceEntry = entryName,
-            )?.let(matches::add)
-        }
-        return matches
-    }
-
-    private fun locateMethodInDexFile(
-        workdirPath: Path,
-        relativeDexPath: String,
-        descriptor: String,
-    ): LocatedMethod? {
-        val dexPath = workdirPath.resolve(relativeDexPath).normalize().toString()
-        return locateMethodInBridge(
-            bridge = DexKitBridge(listOf(dexPath)),
-            descriptor = descriptor,
-            sourcePath = relativeDexPath,
-            sourceEntry = null,
-        )
-    }
-
-    private fun locateMethodInBridge(
-        bridge: DexKitBridge,
-        descriptor: String,
-        sourcePath: String,
-        sourceEntry: String?,
-    ): LocatedMethod? =
-        try {
-            val method = bridge.getMethodData(descriptor) ?: return null
-            LocatedMethod(
-                method = method,
-                sourcePath = sourcePath,
-                sourceEntry = sourceEntry,
-            )
-        } finally {
-            bridge.close()
-        }
 
     private fun loadMethodDetail(
-        workspace: WorkspaceContext,
-        workdirPath: Path,
-        inventory: MaterialInventory,
+        context: TargetDexContext,
         locatedMethod: LocatedMethod,
         includes: Set<MethodDetailSection>,
         classSourceCache: MutableMap<String, MemberSource?>,
         callers: List<MethodHit>?,
     ): MethodDetail {
-        val sourceMethodDetail = if (locatedMethod.sourceEntry != null) {
+        val sourceMethodDetail = if (locatedMethod.source.sourceEntry != null) {
             loadMethodDetailInApk(
-                workspace = workspace,
-                workdirPath = workdirPath,
-                relativeApkPath = locatedMethod.sourcePath,
-                sourceEntry = locatedMethod.sourceEntry,
+                context = context,
+                relativeApkPath = locatedMethod.source.sourcePath,
+                sourceEntry = locatedMethod.source.sourceEntry,
                 descriptor = locatedMethod.method.descriptor,
                 includes = includes,
-                inventory = inventory,
                 classSourceCache = classSourceCache,
             )
         } else {
             loadMethodDetailInDexFile(
-                workspace = workspace,
-                workdirPath = workdirPath,
-                relativeDexPath = locatedMethod.sourcePath,
+                context = context,
+                relativeDexPath = locatedMethod.source.sourcePath,
                 descriptor = locatedMethod.method.descriptor,
                 includes = includes,
-                inventory = inventory,
                 classSourceCache = classSourceCache,
             )
         }
@@ -536,111 +186,109 @@ internal class DefaultDexSearchExecutor(
     }
 
     private fun loadMethodDetailInApk(
-        workspace: WorkspaceContext,
-        workdirPath: Path,
+        context: TargetDexContext,
         relativeApkPath: String,
         sourceEntry: String,
         descriptor: String,
         includes: Set<MethodDetailSection>,
-        inventory: MaterialInventory,
         classSourceCache: MutableMap<String, MemberSource?>,
     ): MethodDetail {
-        val dexPath = prepareApkDexFiles(workspace, workdirPath, relativeApkPath)
-            .firstOrNull { it.first == sourceEntry }
-            ?.second
-            ?: error("APK entry not found for inspected method: $relativeApkPath!$sourceEntry")
         return loadMethodDetailInBridge(
-            workspace = workspace,
-            bridge = DexKitBridge(listOf(dexPath.toString())),
+            context = context,
+            bridge = context.bridge,
             descriptor = descriptor,
             sourcePath = relativeApkPath,
             sourceEntry = sourceEntry,
             includes = includes,
-            workdirPath = workdirPath,
-            inventory = inventory,
             classSourceCache = classSourceCache,
         )
     }
 
     private fun loadMethodDetailInDexFile(
-        workspace: WorkspaceContext,
-        workdirPath: Path,
+        context: TargetDexContext,
         relativeDexPath: String,
         descriptor: String,
         includes: Set<MethodDetailSection>,
-        inventory: MaterialInventory,
         classSourceCache: MutableMap<String, MemberSource?>,
     ): MethodDetail {
-        val dexPath = workdirPath.resolve(relativeDexPath).normalize().toString()
         return loadMethodDetailInBridge(
-            workspace = workspace,
-            bridge = DexKitBridge(listOf(dexPath)),
+            context = context,
+            bridge = context.bridge,
             descriptor = descriptor,
             sourcePath = relativeDexPath,
             sourceEntry = null,
             includes = includes,
-            workdirPath = workdirPath,
-            inventory = inventory,
             classSourceCache = classSourceCache,
         )
     }
 
     private fun loadMethodDetailInBridge(
-        workspace: WorkspaceContext,
+        context: TargetDexContext,
         bridge: DexKitBridge,
         descriptor: String,
         sourcePath: String,
         sourceEntry: String?,
         includes: Set<MethodDetailSection>,
-        workdirPath: Path,
-        inventory: MaterialInventory,
         classSourceCache: MutableMap<String, MemberSource?>,
     ): MethodDetail =
-        try {
-            MethodDetail(
-                method = bridge.getMethodData(descriptor)?.toMethodHit(sourcePath, sourceEntry)
-                    ?: error("method not found in resolved source: $descriptor"),
-                usingFields = includes.takeIf { MethodDetailSection.UsingFields in it }?.let {
-                    bridge.getMethodUsingFields(descriptor).map { usage ->
-                        MethodFieldUsage(
-                            usingType = usage.usingType.toFieldUsageType(),
-                            field = usage.field.toResolvedFieldHit(
-                                workspace = workspace,
-                                workdirPath = workdirPath,
-                                inventory = inventory,
-                                classSourceCache = classSourceCache,
-                            ),
-                        )
-                    }
-                },
-                callers = null,
-                invokes = includes.takeIf { MethodDetailSection.Invokes in it }?.let {
-                    bridge.getMethodInvokes(descriptor).map { invoked ->
-                        invoked.toResolvedMethodHit(
-                            workspace = workspace,
-                            workdirPath = workdirPath,
-                            inventory = inventory,
+        MethodDetail(
+            method = bridge.getMethodData(descriptor)?.toMethodHit(sourcePath, sourceEntry)
+                ?: error("method not found in resolved source: $descriptor"),
+            usingFields = includes.takeIf { MethodDetailSection.UsingFields in it }?.let {
+                bridge.getMethodUsingFields(descriptor).map { usage ->
+                    MethodFieldUsage(
+                        usingType = usage.usingType.toFieldUsageType(),
+                        field = usage.field.toResolvedFieldHit(
+                            context = context,
                             classSourceCache = classSourceCache,
-                        )
-                    }
-                },
-            )
-        } finally {
-            bridge.close()
-        }
+                        ),
+                    )
+                }
+            },
+            callers = null,
+            invokes = includes.takeIf { MethodDetailSection.Invokes in it }?.let {
+                bridge.getMethodInvokes(descriptor).map { invoked ->
+                    invoked.toResolvedMethodHit(
+                        context = context,
+                        classSourceCache = classSourceCache,
+                    )
+                }
+            },
+        )
 
-    private fun findMethodCallers(
-        workspace: WorkspaceContext,
-        inventory: MaterialInventory,
-        method: MethodData,
-    ): List<MethodHit> {
+    private fun findMethodCallers(context: TargetDexContext, method: MethodData): List<MethodHit> {
         val query = buildExactCallersQuery(method)
-        return findMethods(
-            workspace = workspace,
-            inventory = inventory,
-            query = query,
-        ).distinct()
+        return context.bridge.findMethod(query)
+            .map {
+                val source = context.resolveSource(it.dexId)
+                it.toMethodHit(source?.sourcePath, source?.sourceEntry)
+            }
+            .distinct()
     }
+
+    private fun loadMethodInvokes(
+        context: TargetDexContext,
+        locatedMethod: LocatedMethod,
+        classSourceCache: MutableMap<String, MemberSource?>,
+    ): List<MethodHit> =
+        if (locatedMethod.source.sourceEntry != null) {
+            loadMethodDetailInApk(
+                context = context,
+                relativeApkPath = locatedMethod.source.sourcePath,
+                sourceEntry = locatedMethod.source.sourceEntry,
+                descriptor = locatedMethod.method.descriptor,
+                includes = setOf(MethodDetailSection.Invokes),
+                classSourceCache = classSourceCache,
+            ).invokes.orEmpty()
+        } else {
+            loadMethodDetailInDexFile(
+                context = context,
+                relativeDexPath = locatedMethod.source.sourcePath,
+                descriptor = locatedMethod.method.descriptor,
+                includes = setOf(MethodDetailSection.Invokes),
+                classSourceCache = classSourceCache,
+            ).invokes.orEmpty()
+        }
 
     private fun buildExactCallersQuery(method: MethodData): FindMethod =
         FindMethod(
@@ -651,6 +299,109 @@ internal class DefaultDexSearchExecutor(
                 ),
             ),
         )
+
+    private fun buildExactMethodQuery(method: MethodData, className: String): FindMethod =
+        FindMethod(
+            matcher = MethodMatcher(
+                name = StringMatcher(value = method.name, matchType = StringMatchType.Equals),
+                declaredClass = ClassMatcher(
+                    className = StringMatcher(value = className, matchType = StringMatchType.Equals),
+                ),
+                returnType = ClassMatcher(
+                    className = StringMatcher(value = method.returnTypeName, matchType = StringMatchType.Equals),
+                ),
+                params = ParametersMatcher(
+                    params = method.paramTypeNames.map { typeName ->
+                        ParameterMatcher(
+                            type = ClassMatcher(
+                                className = StringMatcher(value = typeName, matchType = StringMatchType.Equals),
+                            ),
+                        )
+                    }.toMutableList(),
+                ),
+            ),
+        )
+
+    private fun buildExactDescriptorMethodQuery(descriptor: String): FindMethod {
+        val arrowIndex = descriptor.indexOf("->")
+        val classDescriptor = descriptor.substring(0, arrowIndex)
+        val methodNameStart = arrowIndex + 2
+        val paramsStart = descriptor.indexOf('(', startIndex = methodNameStart)
+        val methodName = descriptor.substring(methodNameStart, paramsStart)
+        val paramsEnd = descriptor.indexOf(')', startIndex = paramsStart)
+        val paramDescriptors = parseParameterTypeDescriptors(descriptor.substring(paramsStart + 1, paramsEnd))
+        val returnDescriptor = descriptor.substring(paramsEnd + 1)
+        return FindMethod(
+            matcher = MethodMatcher(
+                name = StringMatcher(value = methodName, matchType = StringMatchType.Equals),
+                declaredClass = ClassMatcher(
+                    className = StringMatcher(
+                        value = descriptorTypeToClassName(classDescriptor),
+                        matchType = StringMatchType.Equals,
+                    ),
+                ),
+                returnType = ClassMatcher(
+                    className = StringMatcher(
+                        value = descriptorTypeToClassName(returnDescriptor),
+                        matchType = StringMatchType.Equals,
+                    ),
+                ),
+                params = ParametersMatcher(
+                    params = paramDescriptors.map { paramDescriptor ->
+                        ParameterMatcher(
+                            type = ClassMatcher(
+                                className = StringMatcher(
+                                    value = descriptorTypeToClassName(paramDescriptor),
+                                    matchType = StringMatchType.Equals,
+                                ),
+                            ),
+                        )
+                    }.toMutableList(),
+                ),
+            ),
+        )
+    }
+
+    private fun parseParameterTypeDescriptors(paramsDescriptor: String): List<String> {
+        val descriptors = mutableListOf<String>()
+        var index = 0
+        while (index < paramsDescriptor.length) {
+            val start = index
+            while (index < paramsDescriptor.length && paramsDescriptor[index] == '[') {
+                index++
+            }
+            check(index < paramsDescriptor.length) { "invalid parameter descriptor: $paramsDescriptor" }
+            if (paramsDescriptor[index] == 'L') {
+                val end = paramsDescriptor.indexOf(';', startIndex = index)
+                check(end >= 0) { "invalid object parameter descriptor: $paramsDescriptor" }
+                descriptors += paramsDescriptor.substring(start, end + 1)
+                index = end + 1
+            } else {
+                descriptors += paramsDescriptor.substring(start, index + 1)
+                index++
+            }
+        }
+        return descriptors
+    }
+
+    private fun descriptorTypeToClassName(typeDescriptor: String): String =
+        when {
+            typeDescriptor.startsWith('[') -> typeDescriptor.replace('/', '.')
+            typeDescriptor.startsWith('L') && typeDescriptor.endsWith(';') ->
+                typeDescriptor.substring(1, typeDescriptor.length - 1).replace('/', '.')
+            else -> when (typeDescriptor) {
+                "V" -> "void"
+                "Z" -> "boolean"
+                "B" -> "byte"
+                "S" -> "short"
+                "C" -> "char"
+                "I" -> "int"
+                "J" -> "long"
+                "F" -> "float"
+                "D" -> "double"
+                else -> error("unsupported type descriptor: $typeDescriptor")
+            }
+        }
 
     private fun MethodData.toExactMethodMatcher(): MethodMatcher =
         MethodMatcher(
@@ -673,48 +424,30 @@ internal class DefaultDexSearchExecutor(
         )
 
     private fun resolveClassSource(
-        workspace: WorkspaceContext,
-        workdirPath: Path,
-        inventory: MaterialInventory,
+        context: TargetDexContext,
         className: String,
         classSourceCache: MutableMap<String, MemberSource?>,
     ): MemberSource? =
         classSourceCache.getOrPut(className) {
-            val descriptor = toTypeSignature(className)
-            val matches = mutableListOf<MemberSource>()
-            inventory.apkFiles.forEach { apkPath ->
-                matches += resolveClassSourceInApk(workspace, workdirPath, apkPath, descriptor)
-            }
-            inventory.dexFiles.forEach { dexPath ->
-                resolveClassSourceInDexFile(workdirPath, dexPath, descriptor)?.let(matches::add)
-            }
-            matches.singleOrNull()
+            context.bridge.getClassData(toTypeSignature(className))
+                ?.dexId
+                ?.let(context::resolveSource)
         }
 
-    private fun resolveClassSourceInApk(
-        workspace: WorkspaceContext,
-        workdirPath: Path,
-        relativeApkPath: String,
-        descriptor: String,
-    ): List<MemberSource> {
-        val matches = mutableListOf<MemberSource>()
-        for ((entryName, dexPath) in prepareApkDexFiles(workspace, workdirPath, relativeApkPath)) {
-            val present = DexKitBridge(listOf(dexPath.toString())).useGetClassData(descriptor) { it != null }
-            if (present) {
-                matches += MemberSource(sourcePath = relativeApkPath, sourceEntry = entryName)
-            }
+    private fun resolveUniqueLocatedMethod(context: TargetDexContext, descriptor: String): LocatedMethod {
+        val matches = context.bridge.findMethod(buildExactDescriptorMethodQuery(descriptor))
+            .map { method -> LocatedMethod(method = method, source = context.requireSource(method.dexId)) }
+        return when (matches.size) {
+            1 -> matches.single()
+            0 -> throw DexInspectError(
+                reason = DexInspectErrorReason.MethodNotFound,
+                message = "method not found: $descriptor",
+            )
+            else -> throw DexInspectError(
+                reason = DexInspectErrorReason.AmbiguousMethod,
+                message = "method resolves to multiple dex sources and inspect-method requires a unique descriptor within the workspace: $descriptor",
+            )
         }
-        return matches
-    }
-
-    private fun resolveClassSourceInDexFile(
-        workdirPath: Path,
-        relativeDexPath: String,
-        descriptor: String,
-    ): MemberSource? {
-        val dexPath = workdirPath.resolve(relativeDexPath).normalize().toString()
-        val present = DexKitBridge(listOf(dexPath)).useGetClassData(descriptor) { it != null }
-        return if (present) MemberSource(sourcePath = relativeDexPath, sourceEntry = null) else null
     }
 
     private fun prepareApkDexFiles(
@@ -795,53 +528,83 @@ internal class DefaultDexSearchExecutor(
         DexKitNativeLoader.ensureLoaded()
     }
 
-    private inline fun <T> DexKitBridge.useFindClass(query: FindClass, block: (List<ClassData>) -> T): T =
-        try {
-            block(findClass(query))
-        } finally {
-            close()
+    override fun close() {
+        synchronized(targetContextLock) {
+            closeCachedTargetDexContextLocked()
         }
+    }
 
-    private inline fun <T> DexKitBridge.useFindMethod(query: FindMethod, block: (List<MethodData>) -> T): T =
-        try {
-            block(findMethod(query))
-        } finally {
-            close()
-        }
-
-    private inline fun <T> DexKitBridge.useFindField(query: FindField, block: (List<FieldData>) -> T): T =
-        try {
-            block(findField(query))
-        } finally {
-            close()
-        }
-
-    private inline fun <T> DexKitBridge.useBatchFindClassUsingStrings(
-        query: BatchFindClassUsingStrings,
-        block: (Map<String, List<ClassData>>) -> T,
+    private fun <T> withTargetDexContext(
+        workspace: WorkspaceContext,
+        workdirPath: Path,
+        inventory: MaterialInventory,
+        block: (TargetDexContext) -> T,
     ): T =
-        try {
-            block(batchFindClassUsingStrings(query))
-        } finally {
-            close()
+        synchronized(targetContextLock) {
+            block(getOrCreateTargetDexContextLocked(workspace, workdirPath, inventory))
         }
 
-    private inline fun <T> DexKitBridge.useBatchFindMethodUsingStrings(
-        query: BatchFindMethodUsingStrings,
-        block: (Map<String, List<MethodData>>) -> T,
-    ): T =
-        try {
-            block(batchFindMethodUsingStrings(query))
-        } finally {
-            close()
+    private fun getOrCreateTargetDexContextLocked(
+        workspace: WorkspaceContext,
+        workdirPath: Path,
+        inventory: MaterialInventory,
+    ): TargetDexContext {
+        val cacheKey = TargetDexCacheKey(
+            workdir = workspace.workdir,
+            activeTargetId = workspace.activeTargetId,
+            contentFingerprint = workspace.snapshot.contentFingerprint,
+        )
+        val cached = cachedTargetDexContext
+        if (cached != null && cached.cacheKey == cacheKey) {
+            return cached.context
         }
 
-    private inline fun <T> DexKitBridge.useGetClassData(descriptor: String, block: (ClassData?) -> T): T =
-        try {
-            block(getClassData(descriptor))
-        } finally {
-            close()
+        closeCachedTargetDexContextLocked()
+        val context = buildTargetDexContext(workspace, workdirPath, inventory)
+        cachedTargetDexContext = CachedTargetDexContext(cacheKey = cacheKey, context = context)
+        return context
+    }
+
+    private fun closeCachedTargetDexContextLocked() {
+        val cached = cachedTargetDexContext ?: return
+        cachedTargetDexContext = null
+        cached.context.bridge.close()
+    }
+
+    private fun buildTargetDexContext(
+        workspace: WorkspaceContext,
+        workdirPath: Path,
+        inventory: MaterialInventory,
+    ): TargetDexContext {
+        val sources = buildTargetDexSources(workspace, workdirPath, inventory)
+        return TargetDexContext(
+            bridge = DexKitBridge(sources.map { it.dexPath.toString() }),
+            sourcesByDexId = sources.mapIndexed { index, source -> index to source.memberSource }.toMap(),
+        )
+    }
+
+    private fun buildTargetDexSources(
+        workspace: WorkspaceContext,
+        workdirPath: Path,
+        inventory: MaterialInventory,
+    ): List<TargetDexSource> {
+        val sources = mutableListOf<TargetDexSource>()
+        inventory.apkFiles.forEach { apkPath ->
+            prepareApkDexFiles(workspace, workdirPath, apkPath).forEach { (entryName, dexPath) ->
+                sources += TargetDexSource(
+                    dexPath = dexPath,
+                    memberSource = MemberSource(sourcePath = apkPath, sourceEntry = entryName),
+                )
+            }
         }
+        inventory.dexFiles.forEach { dexPath ->
+            sources += TargetDexSource(
+                dexPath = workdirPath.resolve(dexPath).normalize(),
+                memberSource = MemberSource(sourcePath = dexPath, sourceEntry = null),
+            )
+        }
+        return sources
+    }
 
     private fun validateMethodDescriptor(descriptor: String) {
         val arrowIndex = descriptor.indexOf("->")
@@ -879,23 +642,28 @@ internal class DefaultDexSearchExecutor(
             sourceEntry = sourceEntry,
         )
 
+    private fun TargetDexContext.toClassHit(classData: ClassData): ClassHit {
+        val source = resolveSource(classData.dexId)
+        return ClassHit(
+            className = classData.descriptor,
+            sourcePath = source?.sourcePath,
+            sourceEntry = source?.sourceEntry,
+        )
+    }
+
     private fun MethodData.toResolvedMethodHit(
-        workspace: WorkspaceContext,
-        workdirPath: Path,
-        inventory: MaterialInventory,
+        context: TargetDexContext,
         classSourceCache: MutableMap<String, MemberSource?>,
     ): MethodHit {
-        val source = resolveClassSource(workspace, workdirPath, inventory, className, classSourceCache)
+        val source = context.resolveSource(dexId) ?: resolveClassSource(context, className, classSourceCache)
         return toMethodHit(source?.sourcePath, source?.sourceEntry)
     }
 
     private fun FieldData.toResolvedFieldHit(
-        workspace: WorkspaceContext,
-        workdirPath: Path,
-        inventory: MaterialInventory,
+        context: TargetDexContext,
         classSourceCache: MutableMap<String, MemberSource?>,
     ): FieldHit {
-        val source = resolveClassSource(workspace, workdirPath, inventory, className, classSourceCache)
+        val source = context.resolveSource(dexId) ?: resolveClassSource(context, className, classSourceCache)
         return toFieldHit(source?.sourcePath, source?.sourceEntry)
     }
 
@@ -905,18 +673,43 @@ internal class DefaultDexSearchExecutor(
             io.github.dexclub.dexkit.result.FieldUsingType.Write -> FieldUsageType.Write
         }
 
+    private data class TargetDexSource(
+        val dexPath: Path,
+        val memberSource: MemberSource,
+    )
+
+    private data class TargetDexCacheKey(
+        val workdir: String,
+        val activeTargetId: String,
+        val contentFingerprint: String,
+    )
+
+    private data class CachedTargetDexContext(
+        val cacheKey: TargetDexCacheKey,
+        val context: TargetDexContext,
+    )
+
+    private data class TargetDexContext(
+        val bridge: DexKitBridge,
+        val sourcesByDexId: Map<Int, MemberSource>,
+    ) {
+        fun resolveSource(dexId: Int): MemberSource? = sourcesByDexId[dexId]
+
+        fun requireSource(dexId: Int): MemberSource =
+            checkNotNull(resolveSource(dexId)) { "missing source mapping for dexId=$dexId" }
+    }
+
     private data class LocatedMethod(
         val method: MethodData,
-        val sourcePath: String,
-        val sourceEntry: String?,
+        val source: MemberSource,
     ) {
         fun toMethodHit(): MethodHit =
             MethodHit(
                 className = method.className,
                 methodName = method.name,
                 descriptor = method.descriptor,
-                sourcePath = sourcePath,
-                sourceEntry = sourceEntry,
+                sourcePath = source.sourcePath,
+                sourceEntry = source.sourceEntry,
             )
     }
 

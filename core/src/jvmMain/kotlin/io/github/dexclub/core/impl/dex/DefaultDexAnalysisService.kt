@@ -32,7 +32,7 @@ internal class DefaultDexAnalysisService(
     private val queryParser: DexQueryParser,
     private val searchExecutor: DexSearchExecutor,
     private val exportExecutor: DexExportExecutor,
-) : DexAnalysisService {
+) : DexAnalysisService, AutoCloseable {
     override fun findClasses(workspace: WorkspaceContext, request: FindClassesRequest): List<ClassHit> {
         capabilityChecker.require(workspace, Operation.FindClass)
         val snapshot = store.loadSnapshot(workspace.workdir, workspace.activeTargetId)
@@ -299,5 +299,9 @@ internal class DefaultDexAnalysisService(
         if (offset >= hits.size) return emptyList()
         val toIndex = if (limit == null) hits.size else minOf(hits.size, offset + limit)
         return hits.subList(offset, toIndex)
+    }
+
+    override fun close() {
+        searchExecutor.close()
     }
 }

@@ -12,4 +12,6 @@ data class MethodData(
     val modifiers: Int,
     val isConstructor: Boolean,
     val isStaticInitializer: Boolean,
+    val id: Int = -1,
+    val dexId: Int = -1,
 )

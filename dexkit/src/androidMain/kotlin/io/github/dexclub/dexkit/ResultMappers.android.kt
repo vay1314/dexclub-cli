@@ -79,6 +79,8 @@ internal fun NativeClassData.toKmpClassData(): ClassData =
         simpleName = simpleName,
         sourceFile = sourceFile,
         modifiers = modifiers,
+        id = kmpId(),
+        dexId = kmpDexId(),
     )
 
 internal fun NativeMethodData.toKmpMethodData(): MethodData =
@@ -91,6 +93,8 @@ internal fun NativeMethodData.toKmpMethodData(): MethodData =
         modifiers = modifiers,
         isConstructor = isConstructor,
         isStaticInitializer = isStaticInitializer,
+        id = kmpId(),
+        dexId = kmpDexId(),
     )
 
 internal fun NativeFieldData.toKmpFieldData(): FieldData =
@@ -100,7 +104,21 @@ internal fun NativeFieldData.toKmpFieldData(): FieldData =
         className = className,
         typeName = typeName,
         modifiers = modifiers,
+        id = kmpId(),
+        dexId = kmpDexId(),
     )
+
+private fun NativeClassData.kmpId(): Int = runCatching { getEncodeId().toInt() }.getOrDefault(-1)
+
+private fun NativeClassData.kmpDexId(): Int = runCatching { getEncodeId().ushr(32).toInt() }.getOrDefault(-1)
+
+private fun NativeMethodData.kmpId(): Int = runCatching { getEncodeId().toInt() }.getOrDefault(-1)
+
+private fun NativeMethodData.kmpDexId(): Int = runCatching { getEncodeId().ushr(32).toInt() }.getOrDefault(-1)
+
+private fun NativeFieldData.kmpId(): Int = runCatching { getEncodeId().toInt() }.getOrDefault(-1)
+
+private fun NativeFieldData.kmpDexId(): Int = runCatching { getEncodeId().ushr(32).toInt() }.getOrDefault(-1)
 
 internal fun NativeFieldUsingType.toKmpFieldUsingType(): FieldUsingType = when (this) {
     NativeFieldUsingType.Read -> FieldUsingType.Read
