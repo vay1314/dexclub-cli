@@ -362,6 +362,8 @@ internal data class MethodDetailView(
     val usingFields: List<MethodFieldUsageView>? = null,
     val callers: List<MethodHitView>? = null,
     val invokes: List<MethodHitView>? = null,
+    val strings: List<String>? = null,
+    val annotations: List<String>? = null,
 ) {
     companion object {
         fun from(detail: MethodDetail): MethodDetailView =
@@ -370,6 +372,8 @@ internal data class MethodDetailView(
                 usingFields = detail.usingFields?.map(MethodFieldUsageView::from),
                 callers = detail.callers?.map(MethodHitView::from),
                 invokes = detail.invokes?.map(MethodHitView::from),
+                strings = detail.strings,
+                annotations = detail.annotations,
             )
     }
 }

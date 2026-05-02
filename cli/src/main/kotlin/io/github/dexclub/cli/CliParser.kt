@@ -1328,6 +1328,8 @@ internal class CliParser {
                     "using-fields" -> MethodDetailSection.UsingFields
                     "callers" -> MethodDetailSection.Callers
                     "invokes" -> MethodDetailSection.Invokes
+                    "strings" -> MethodDetailSection.Strings
+                    "annotations" -> MethodDetailSection.Annotations
                     "" -> throw CliUsageError(
                         message = "invalid value for --include: empty section is not allowed",
                         usage = usage,
@@ -1410,6 +1412,7 @@ internal class CliParser {
         val output: String,
     )
 }
+
 
 internal object CliUsages {
     const val general: String = "cli <command> ..."

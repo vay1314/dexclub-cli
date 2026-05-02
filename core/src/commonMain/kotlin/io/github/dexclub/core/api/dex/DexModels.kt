@@ -30,6 +30,8 @@ enum class MethodDetailSection {
     UsingFields,
     Callers,
     Invokes,
+    Strings,
+    Annotations,
 }
 
 enum class FieldUsageType {
@@ -47,6 +49,8 @@ data class MethodDetail(
     val usingFields: List<MethodFieldUsage>? = null,
     val callers: List<MethodHit>? = null,
     val invokes: List<MethodHit>? = null,
+    val strings: List<String>? = null,
+    val annotations: List<String>? = null,
 )
 
 data class FindClassesRequest(

@@ -180,14 +180,14 @@ internal object CliHelp {
             arguments = listOf("[workdir]  Optional workspace directory. Defaults to the current directory."),
             options = listOf(
                 "--descriptor <method-descriptor>  Full method descriptor such as Lfoo/Bar;->baz(I)V.",
-                "--include <sections>  Comma-separated sections from using-fields,callers,invokes.",
+                "--include <sections>  Comma-separated sections from using-fields,callers,invokes,strings,annotations.",
                 "--json  Render the structured method detail as JSON.",
             ),
             output = "Text prints the inspected method first, then renders any requested relation sections. JSON prints a single detail object.",
             notes = listOf(
                 "inspect-method is a detail command, not a search command.",
                 "The descriptor must already identify one unique method within the current workspace.",
-                "If --include is omitted, cli returns using-fields, callers, and invokes.",
+                "If --include is omitted, cli returns using-fields, callers, invokes, strings, and annotations.",
             ),
         ),
         CommandHelpSpec(

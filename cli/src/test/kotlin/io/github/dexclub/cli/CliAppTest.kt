@@ -888,6 +888,71 @@ class CliAppTest {
     }
 
     @Test
+    fun inspectMethodCanReturnUsingStrings() {
+        val fixture = CliDexFixture.generated()
+        val app = CliApp(
+            services = createDefaultServices(),
+            cwdProvider = { fixture.dexWorkspaceDir.absolutePath },
+        )
+
+        val initOut = run(app, listOf("init", fixture.dexFile.absolutePath))
+        assertEquals(0, initOut.exitCode)
+
+        val output = run(
+            app,
+            listOf(
+                "inspect-method",
+                "--descriptor",
+                "Lfixture/samples/SampleSearchTarget;->exposeNeedle()Ljava/lang/String;",
+                "--include",
+                "strings",
+                "--json",
+            ),
+        )
+
+        assertEquals(0, output.exitCode, output.stderr)
+        val parsed = Json.parseToJsonElement(output.stdout).jsonObject
+        val strings = parsed.getValue("strings").jsonArray.map { it.jsonPrimitive.content }
+        assertEquals(listOf("dexclub-needle-string"), strings)
+        assertTrue("usingFields" !in parsed)
+        assertTrue("callers" !in parsed)
+        assertTrue("invokes" !in parsed)
+    }
+
+    @Test
+    fun inspectMethodCanReturnAnnotations() {
+        val fixture = CliDexFixture.generated()
+        val app = CliApp(
+            services = createDefaultServices(),
+            cwdProvider = { fixture.dexWorkspaceDir.absolutePath },
+        )
+
+        val initOut = run(app, listOf("init", fixture.dexFile.absolutePath))
+        assertEquals(0, initOut.exitCode)
+
+        val output = run(
+            app,
+            listOf(
+                "inspect-method",
+                "--descriptor",
+                "Lfixture/samples/SampleSearchTarget;->exposeNeedle()Ljava/lang/String;",
+                "--include",
+                "annotations",
+                "--json",
+            ),
+        )
+
+        assertEquals(0, output.exitCode, output.stderr)
+        val parsed = Json.parseToJsonElement(output.stdout).jsonObject
+        val annotations = parsed.getValue("annotations").jsonArray.map { it.jsonPrimitive.content }
+        assertEquals(listOf("""@fixture.samples.Marker(value = "expose-needle")"""), annotations)
+        assertTrue("usingFields" !in parsed)
+        assertTrue("callers" !in parsed)
+        assertTrue("invokes" !in parsed)
+        assertTrue("strings" !in parsed)
+    }
+
+    @Test
     fun inspectMethodReturnsWorkspaceErrorWhenDescriptorIsAmbiguous() {
         val fixture = CliDexFixture.generated()
         val app = CliApp(
@@ -1415,9 +1480,18 @@ private class CliDexFixture(
                 fileName = "SampleSearchTarget.java",
                 source = """
                     package fixture.samples;
+                    import java.lang.annotation.Retention;
+                    import java.lang.annotation.RetentionPolicy;
+
+                    @Retention(RetentionPolicy.RUNTIME)
+                    @interface Marker {
+                        String value();
+                    }
+
                     public class SampleSearchTarget {
                         public static final String NEEDLE = "dexclub-needle-string";
                         public String mutableNeedle = NEEDLE;
+                        @Marker("expose-needle")
                         public String exposeNeedle() {
                             return NEEDLE;
                         }

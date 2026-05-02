@@ -182,6 +182,8 @@ internal class DefaultDexSearchExecutor(
             usingFields = sourceMethodDetail.usingFields,
             callers = callers,
             invokes = sourceMethodDetail.invokes,
+            strings = sourceMethodDetail.strings,
+            annotations = sourceMethodDetail.annotations,
         )
     }
 
@@ -253,6 +255,12 @@ internal class DefaultDexSearchExecutor(
                         classSourceCache = classSourceCache,
                     )
                 }
+            },
+            strings = includes.takeIf { MethodDetailSection.Strings in it }?.let {
+                bridge.getMethodUsingStrings(descriptor)
+            },
+            annotations = includes.takeIf { MethodDetailSection.Annotations in it }?.let {
+                bridge.getMethodAnnotations(descriptor)
             },
         )
 

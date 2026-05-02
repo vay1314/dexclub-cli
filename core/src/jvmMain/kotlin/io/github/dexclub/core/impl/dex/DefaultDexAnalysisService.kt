@@ -291,6 +291,8 @@ internal class DefaultDexAnalysisService(
             ),
             callers = detail.callers?.let(::sortMethodHits),
             invokes = detail.invokes?.let(::sortMethodHits),
+            strings = detail.strings?.distinct()?.sorted(),
+            annotations = detail.annotations?.distinct()?.sorted(),
         )
 
     private fun <T> applyWindow(hits: List<T>, offset: Int, limit: Int?): List<T> {

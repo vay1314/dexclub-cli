@@ -209,7 +209,6 @@ java -jar cli/build/libs/dexclub-cli-all.jar find-method-using-strings /path/to/
 ```bash
 java -jar cli/build/libs/dexclub-cli-all.jar inspect-method /path/to/workdir \
   --descriptor 'Lcom/example/Sample;->name()Ljava/lang/String;' \
-  --include using-fields,callers,invokes \
   --json
 ```
 

@@ -323,6 +323,28 @@ internal class Renderer {
                     append(invoke.sourceEntry.orEmpty())
                 }
             }
+
+            view.strings?.let { strings ->
+                appendLine()
+                appendLine()
+                appendLine("strings")
+                append("value")
+                strings.forEach { value ->
+                    appendLine()
+                    append(value)
+                }
+            }
+
+            view.annotations?.let { annotations ->
+                appendLine()
+                appendLine()
+                appendLine("annotations")
+                append("value")
+                annotations.forEach { value ->
+                    appendLine()
+                    append(value)
+                }
+            }
         }
 
     private fun renderFieldHits(hits: List<FieldHitView>): String =

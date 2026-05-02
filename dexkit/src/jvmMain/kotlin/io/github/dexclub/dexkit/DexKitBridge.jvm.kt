@@ -139,6 +139,18 @@ actual class DexKitBridge {
             ?.usingFields?.map { it.toKmpUsingFieldData() }.orEmpty()
     }
 
+    actual fun getMethodUsingStrings(descriptor: String): List<String> {
+        require(descriptor.isNotEmpty()) { "descriptor 不能为空" }
+        return ensureDelegate().getMethodData(descriptor)
+            ?.usingStrings.orEmpty()
+    }
+
+    actual fun getMethodAnnotations(descriptor: String): List<String> {
+        require(descriptor.isNotEmpty()) { "descriptor 不能为空" }
+        return ensureDelegate().getMethodData(descriptor)
+            ?.annotations?.map { it.toString() }.orEmpty()
+    }
+
     actual fun close() {
         delegate?.close()
         delegate = null

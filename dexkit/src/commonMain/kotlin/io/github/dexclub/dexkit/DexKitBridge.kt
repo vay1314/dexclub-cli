@@ -55,5 +55,9 @@ expect class DexKitBridge(dexPaths: List<String>) {
 
     fun getMethodUsingFields(descriptor: String): List<UsingFieldData>
 
+    fun getMethodUsingStrings(descriptor: String): List<String>
+
+    fun getMethodAnnotations(descriptor: String): List<String>
+
     fun close()
 }

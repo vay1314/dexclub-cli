@@ -343,17 +343,19 @@ cli inspect-method [workdir] --descriptor <method-descriptor> [--include <sectio
 
 - `inspect-method` 是详情命令，不是搜索命令
 - `--descriptor` 必传，且必须在当前工作区内唯一命中
-- `--include` 可选；省略时默认返回 `using-fields,callers,invokes`
+- `--include` 可选；省略时默认返回 `using-fields,callers,invokes,strings,annotations`
 - `--include` 当前仅支持：
   - `using-fields`
   - `callers`
   - `invokes`
+  - `strings`
+  - `annotations`
 - `--json` 控制输出单个详情对象，而不是数组
 
 输出语义：
 
 - 顶层固定包含 `method`
-- `usingFields` / `callers` / `invokes` 只在被请求时输出
+- `usingFields` / `callers` / `invokes` / `strings` / `annotations` 只在被请求时输出
 - 某个 section 被请求但没有结果时返回空数组
 - 未被请求的 section 直接省略
 
