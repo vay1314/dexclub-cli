@@ -1,0 +1,104 @@
+name: Build Packages
+
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      native_target:
+        description: "仅构建指定 DexKit native 目标；留空时构建全部"
+        required: false
+        type: choice
+        default: all
+        options:
+          - all
+          - linux-x64
+          - linux-arm64
+          - android-arm64
+          - windows-x64
+          - macos-x64
+          - macos-arm64
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-packages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-native:
+    name: build-native
+    uses: ./.github/workflows/build-native.yml
+    with:
+      native_target: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.native_target || 'all' }}
+
+  build-cli:
+    needs: build-native
+    name: build-cli
+    uses: ./.github/workflows/build-cli.yml
+    with:
+      native_target: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.native_target || 'all' }}
+
+  build-mcp:
+    needs: build-native
+    name: build-mcp
+    uses: ./.github/workflows/build-mcp.yml
+    with:
+      native_target: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.native_target || 'all' }}
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - build-cli
+      - build-mcp
+    name: release
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Download CLI package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dexclub-cli-*
+          path: release-artifacts
+
+      - name: Download MCP package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dexclub-mcp-*
+          path: release-artifacts
+
+      - name: Publish release assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $isPrerelease = $tag -match '(preview|beta|rc)'
+          $assets = Get-ChildItem -Path release-artifacts -Recurse -File |
+            Where-Object { $_.Extension -in @('.zip', '.sha256') } |
+            Sort-Object FullName
+
+          if ($assets.Count -eq 0) {
+            throw "No release assets were collected."
+          }
+
+          $assetPaths = $assets | ForEach-Object { $_.FullName }
+          if (gh release view $tag *> $null) {
+            gh release upload $tag @assetPaths --clobber
+          } else {
+            try {
+              if ($isPrerelease) {
+                gh release create $tag @assetPaths --verify-tag --generate-notes --prerelease
+              } else {
+                gh release create $tag @assetPaths --verify-tag --generate-notes
+              }
+            } catch {
+              gh release upload $tag @assetPaths --clobber
+            }
+          }

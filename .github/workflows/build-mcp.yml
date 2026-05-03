@@ -1,4 +1,4 @@
-name: Build CLI Package
+name: Build MCP Package
 
 on:
   workflow_call:
@@ -10,8 +10,8 @@ on:
         default: all
 
 jobs:
-  build-cli-package:
-    name: build-cli-package (${{ matrix.target }})
+  build-mcp-package:
+    name: build-mcp-package (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -21,8 +21,8 @@ jobs:
             runner: ubuntu-24.04
             os_name: linux
             arch: x64
-            dist_task: :cli:shadowDistZip
-            dist_zip_name: cli-shadow.zip
+            native_file_name: libdexkit.so
+            gradle_command: ./gradlew
             msys2_msystem: ""
             msys2_install: ""
             msys2_bin_subdir: ""
@@ -30,17 +30,8 @@ jobs:
             runner: ubuntu-24.04-arm
             os_name: linux
             arch: arm64
-            dist_task: :cli:shadowDistZip
-            dist_zip_name: cli-shadow.zip
-            msys2_msystem: ""
-            msys2_install: ""
-            msys2_bin_subdir: ""
-          - target: android-arm64
-            runner: ubuntu-24.04
-            os_name: android
-            arch: arm64
-            dist_task: :cli:shadowDistZip
-            dist_zip_name: cli-shadow.zip
+            native_file_name: libdexkit.so
+            gradle_command: ./gradlew
             msys2_msystem: ""
             msys2_install: ""
             msys2_bin_subdir: ""
@@ -48,8 +39,8 @@ jobs:
             runner: windows-2022
             os_name: windows
             arch: x64
-            dist_task: :cli:shadowDistZip
-            dist_zip_name: cli-shadow.zip
+            native_file_name: libdexkit.dll
+            gradle_command: .\\gradlew.bat
             msys2_msystem: MINGW64
             msys2_install: >-
               mingw-w64-x86_64-gcc
@@ -61,8 +52,8 @@ jobs:
             runner: macos-15-intel
             os_name: macos
             arch: x64
-            dist_task: :cli:shadowDistZip
-            dist_zip_name: cli-shadow.zip
+            native_file_name: libdexkit.dylib
+            gradle_command: ./gradlew
             msys2_msystem: ""
             msys2_install: ""
             msys2_bin_subdir: ""
@@ -70,8 +61,8 @@ jobs:
             runner: macos-15
             os_name: macos
             arch: arm64
-            dist_task: :cli:shadowDistZip
-            dist_zip_name: cli-shadow.zip
+            native_file_name: libdexkit.dylib
+            gradle_command: ./gradlew
             msys2_msystem: ""
             msys2_install: ""
             msys2_bin_subdir: ""
@@ -152,17 +143,10 @@ jobs:
           name: dexkit-native-${{ matrix.target }}
           path: .ci/native
 
-      - name: Build CLI shadow distribution
+      - name: Build MCP distribution
         if: steps.filter.outputs.enabled == 'true'
         shell: pwsh
         run: |
-          $nativeDir = (Resolve-Path (Join-Path $PWD ".ci/native")).Path
-          $gradleArgs = @(
-            "--no-daemon"
-            "-Pdexkit.native.dir=$nativeDir"
-            "${{ matrix.dist_task }}"
-          )
-
           if ($env:RUNNER_OS -eq 'Windows') {
             $msys2Location = "${{ steps.msys2.outputs.msys2-location }}"
             if ([string]::IsNullOrWhiteSpace($msys2Location)) {
@@ -175,27 +159,45 @@ jobs:
             }
 
             $env:PATH = "$toolchainBin;$env:PATH"
-            & ".\\gradlew.bat" @gradleArgs
+            & ".\\gradlew.bat" --no-daemon :mcp:installDist
           } else {
-            & "./gradlew" @gradleArgs
+            & "${{ matrix.gradle_command }}" --no-daemon :mcp:installDist
           }
 
       - name: Package artifact
         if: steps.filter.outputs.enabled == 'true'
         shell: pwsh
         run: |
-          $distDir = Join-Path $PWD "cli/build/distributions"
-          $sourceZip = Join-Path $distDir "${{ matrix.dist_zip_name }}"
-          if (!(Test-Path $sourceZip)) {
-            throw "Missing distribution archive: $sourceZip"
+          $nativeDir = (Resolve-Path (Join-Path $PWD ".ci/native")).Path
+          $nativePath = Join-Path $nativeDir "${{ matrix.native_file_name }}"
+          if (!(Test-Path $nativePath)) {
+            throw "Missing native artifact: $nativePath"
+          }
+
+          $installDir = Join-Path $PWD "mcp/build/install/mcp"
+          if (!(Test-Path $installDir)) {
+            throw "Missing MCP install directory: $installDir"
           }
 
           $artifactDir = Join-Path $PWD "artifacts"
-          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+          $packageDir = Join-Path $artifactDir "package"
+          if (Test-Path $packageDir) {
+            Remove-Item -Recurse -Force $packageDir
+          }
+          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
 
-          $targetBaseName = "dexclub-cli-${{ matrix.os_name }}-${{ matrix.arch }}"
+          $targetBaseName = "dexclub-mcp-${{ matrix.os_name }}-${{ matrix.arch }}"
+          $targetRoot = Join-Path $packageDir $targetBaseName
+          Copy-Item -Recurse -Force $installDir $targetRoot
+
+          $targetLibDir = Join-Path $targetRoot "lib"
+          Copy-Item $nativePath (Join-Path $targetLibDir "${{ matrix.native_file_name }}")
+
           $targetZip = Join-Path $artifactDir "$targetBaseName.zip"
-          Copy-Item $sourceZip $targetZip
+          if (Test-Path $targetZip) {
+            Remove-Item -Force $targetZip
+          }
+          Compress-Archive -Path $targetRoot -DestinationPath $targetZip
 
           $hash = (Get-FileHash -Path $targetZip -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $targetBaseName.zip" | Out-File -FilePath (Join-Path $artifactDir "$targetBaseName.sha256") -Encoding ascii
@@ -204,6 +206,6 @@ jobs:
         if: steps.filter.outputs.enabled == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: dexclub-cli-${{ matrix.os_name }}-${{ matrix.arch }}
+          name: dexclub-mcp-${{ matrix.os_name }}-${{ matrix.arch }}
           path: artifacts/
           if-no-files-found: error

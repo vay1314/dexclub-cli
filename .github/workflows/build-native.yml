@@ -1,0 +1,315 @@
+name: Build Native
+
+on:
+  workflow_call:
+    inputs:
+      native_target:
+        description: "仅构建指定 DexKit native 目标；留空或 all 时构建全部"
+        required: false
+        type: string
+        default: all
+  workflow_dispatch:
+    inputs:
+      native_target:
+        description: "仅构建指定 DexKit native 目标；留空时构建全部"
+        required: false
+        type: choice
+        default: all
+        options:
+          - all
+          - linux-x64
+          - linux-arm64
+          - android-arm64
+          - windows-x64
+          - macos-x64
+          - macos-arm64
+
+jobs:
+  build-libcxx:
+    name: build-libcxx
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: >-
+            platform-tools
+            build-tools;36.0.0
+            platforms;android-36
+            ndk;28.2.13676358
+            cmake;3.18.1
+            cmake;3.31.6
+
+      - name: Prepare libcxx local.properties
+        shell: pwsh
+        run: |
+          $sdkDir = $env:ANDROID_SDK_ROOT
+          if ([string]::IsNullOrWhiteSpace($sdkDir)) {
+            throw "ANDROID_SDK_ROOT is empty after setup-android"
+          }
+
+          $sdkDir = $sdkDir -replace '\\', '/'
+          "sdk.dir=$sdkDir" | Out-File -FilePath (Join-Path $PWD "dexkit/vendor/libcxx-prefab/local.properties") -Encoding ascii
+
+      - name: Publish libcxx prefab to mavenLocal
+        shell: pwsh
+        run: |
+          & "./gradlew" --no-daemon -p "dexkit/vendor/libcxx-prefab" :cxx:publishToMavenLocal
+
+      - name: Stage libcxx mavenLocal files
+        shell: pwsh
+        run: |
+          $sourceDir = Join-Path $HOME ".m2/repository/dev/rikka/ndk/thirdparty/libcxx"
+          if (!(Test-Path $sourceDir)) {
+            throw "Missing published libcxx mavenLocal directory: $sourceDir"
+          }
+
+          $stageDir = Join-Path $PWD "artifacts/m2/dev/rikka/ndk/thirdparty/libcxx"
+          New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
+          Copy-Item -Recurse -Force (Join-Path $sourceDir "*") $stageDir
+
+      - name: Upload libcxx mavenLocal files
+        uses: actions/upload-artifact@v4
+        with:
+          name: libcxx-m2
+          path: artifacts/m2/
+          if-no-files-found: error
+
+  build-dexkit-native:
+    needs: build-libcxx
+    name: build-dexkit-native (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            runner: ubuntu-24.04
+            os_name: linux
+            arch: x64
+            native_file_name: libdexkit.so
+            gradle_command: ./gradlew
+            gradle_task: :DexKit:dexkit:copyLibrary
+            msys2_msystem: ""
+            msys2_install: ""
+            msys2_bin_subdir: ""
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            os_name: linux
+            arch: arm64
+            native_file_name: libdexkit.so
+            gradle_command: ./gradlew
+            gradle_task: :DexKit:dexkit:copyLibrary
+            msys2_msystem: ""
+            msys2_install: ""
+            msys2_bin_subdir: ""
+          - target: android-arm64
+            runner: ubuntu-24.04
+            os_name: android
+            arch: arm64
+            native_file_name: libdexkit.so
+            gradle_command: ./gradlew
+            gradle_task: :DexKit:dexkit-android:assembleRelease
+            msys2_msystem: ""
+            msys2_install: ""
+            msys2_bin_subdir: ""
+          - target: windows-x64
+            runner: windows-2022
+            os_name: windows
+            arch: x64
+            native_file_name: libdexkit.dll
+            gradle_command: .\\gradlew.bat
+            gradle_task: :DexKit:dexkit:copyLibrary
+            msys2_msystem: MINGW64
+            msys2_install: >-
+              mingw-w64-x86_64-gcc
+              mingw-w64-x86_64-cmake
+              mingw-w64-x86_64-ninja
+              mingw-w64-x86_64-zlib
+            msys2_bin_subdir: mingw64/bin
+          - target: macos-x64
+            runner: macos-15-intel
+            os_name: macos
+            arch: x64
+            native_file_name: libdexkit.dylib
+            gradle_command: ./gradlew
+            gradle_task: :DexKit:dexkit:copyLibrary
+            msys2_msystem: ""
+            msys2_install: ""
+            msys2_bin_subdir: ""
+          - target: macos-arm64
+            runner: macos-15
+            os_name: macos
+            arch: arm64
+            native_file_name: libdexkit.dylib
+            gradle_command: ./gradlew
+            gradle_task: :DexKit:dexkit:copyLibrary
+            msys2_msystem: ""
+            msys2_install: ""
+            msys2_bin_subdir: ""
+
+    steps:
+      - name: Select target
+        id: filter
+        shell: pwsh
+        run: |
+          $selectedTarget = "${{ inputs.native_target }}"
+          $enabled = [string]::IsNullOrWhiteSpace($selectedTarget) -or
+            $selectedTarget -eq "all" -or
+            $selectedTarget -eq "${{ matrix.target }}"
+
+          if ($enabled) {
+            "enabled=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            "enabled=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            Write-Host "Skip matrix target: ${{ matrix.target }}"
+          }
+
+      - name: Checkout
+        if: steps.filter.outputs.enabled == 'true'
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Java
+        if: steps.filter.outputs.enabled == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Gradle
+        if: steps.filter.outputs.enabled == 'true'
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Download libcxx mavenLocal files
+        if: steps.filter.outputs.enabled == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: libcxx-m2
+          path: .ci/libcxx-m2
+
+      - name: Restore libcxx mavenLocal files
+        if: steps.filter.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $sourceDir = Join-Path $PWD ".ci/libcxx-m2/dev"
+          if (!(Test-Path $sourceDir)) {
+            throw "Missing downloaded libcxx mavenLocal files: $sourceDir"
+          }
+
+          $targetDir = Join-Path $HOME ".m2/repository/dev"
+          New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+          Copy-Item -Recurse -Force (Join-Path $sourceDir "*") $targetDir
+
+      - name: Setup Android SDK
+        if: steps.filter.outputs.enabled == 'true'
+        uses: android-actions/setup-android@v4
+        with:
+          packages: >-
+            platform-tools
+            build-tools;36.0.0
+            platforms;android-36
+            ndk;28.2.13676358
+            cmake;3.18.1
+            cmake;3.31.6
+
+      - name: Setup MSYS2 toolchain
+        if: steps.filter.outputs.enabled == 'true' && runner.os == 'Windows'
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msys2_msystem }}
+          update: true
+          path-type: minimal
+          install: ${{ matrix.msys2_install }}
+
+      - name: Prepare Android local.properties
+        if: steps.filter.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $sdkDir = $env:ANDROID_SDK_ROOT
+          if ([string]::IsNullOrWhiteSpace($sdkDir)) {
+            throw "ANDROID_SDK_ROOT is empty after setup-android"
+          }
+
+          $sdkDir = $sdkDir -replace '\\', '/'
+          "sdk.dir=$sdkDir" | Out-File -FilePath (Join-Path $PWD "local.properties") -Encoding ascii
+          "sdk.dir=$sdkDir" | Out-File -FilePath (Join-Path $PWD "dexkit/vendor/DexKit/local.properties") -Encoding ascii
+
+      - name: Build DexKit native artifact
+        if: steps.filter.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          if ($env:RUNNER_OS -eq 'Windows') {
+            $msys2Location = "${{ steps.msys2.outputs.msys2-location }}"
+            if ([string]::IsNullOrWhiteSpace($msys2Location)) {
+              throw "MSYS2 location output is empty on Windows build."
+            }
+
+            $toolchainBin = Join-Path $msys2Location "${{ matrix.msys2_bin_subdir }}"
+            if (!(Test-Path $toolchainBin)) {
+              throw "Missing MSYS2 toolchain bin directory: $toolchainBin"
+            }
+
+            $env:PATH = "$toolchainBin;$env:PATH"
+          }
+
+          & "${{ matrix.gradle_command }}" --no-daemon ${{ matrix.gradle_task }}
+
+      - name: Stage native artifact
+        if: steps.filter.outputs.enabled == 'true'
+        shell: pwsh
+        run: |
+          $artifactDir = Join-Path $PWD "artifacts/native"
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+
+          if ("${{ matrix.target }}" -eq "android-arm64") {
+            $aarPath = Join-Path $PWD "dexkit/vendor/DexKit/dexkit-android/build/outputs/aar/dexkit-android-release.aar"
+            if (!(Test-Path $aarPath)) {
+              throw "Missing Android AAR artifact: $aarPath"
+            }
+
+            $extractDir = Join-Path $PWD "artifacts/android-aar"
+            if (Test-Path $extractDir) {
+              Remove-Item -Recurse -Force $extractDir
+            }
+            Expand-Archive -Path $aarPath -DestinationPath $extractDir -Force
+
+            $nativePath = Join-Path $extractDir "jni/arm64-v8a/${{ matrix.native_file_name }}"
+            if (!(Test-Path $nativePath)) {
+              throw "Missing native library in AAR: $nativePath"
+            }
+
+            Copy-Item $nativePath (Join-Path $artifactDir "${{ matrix.native_file_name }}")
+          } else {
+            $nativePath = Join-Path $PWD "dexkit/vendor/DexKit/dexkit/build/library/${{ matrix.native_file_name }}"
+            if (!(Test-Path $nativePath)) {
+              throw "Missing native library artifact: $nativePath"
+            }
+
+            Copy-Item $nativePath (Join-Path $artifactDir "${{ matrix.native_file_name }}")
+          }
+
+      - name: Upload native artifact
+        if: steps.filter.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dexkit-native-${{ matrix.target }}
+          path: artifacts/native/
+          if-no-files-found: error
