@@ -434,17 +434,29 @@ P0 应至少允许 skill 拿到：
 
 目标：
 
-- 按资源名/类型搜索资源候选
+- 按资源值搜索资源候选
 
 建议输入：
 
 - `session` 或 `workdir`
 - `type`
-- `name_contains`
+- `value`
+- `contains`
+- `ignore_case`
 - `offset`
 - `limit`
 - `fields`
 - `brief`
+
+补充约定：
+
+- 当前能力面应直接对齐现有 `core` 真实能力
+- `find_res` 的主语是资源值命中，不是资源名命中
+- 当前建议至少支持：
+  - `type=string`
+  - `type=integer`
+  - `type=bool`
+  - `type=color`
 
 ### `resolve_res`
 
@@ -455,7 +467,7 @@ P0 应至少允许 skill 拿到：
 建议输入：
 
 - `session` 或 `workdir`
-- `id`
+- `resource_id`
   或
 - `type` + `name`
 
@@ -467,7 +479,7 @@ P0 应至少允许 skill 拿到：
 
 目标：
 
-- 返回资源列表
+- 返回资源条目列表
 
 建议输入：
 
@@ -477,6 +489,11 @@ P0 应至少允许 skill 拿到：
 - `limit`
 - `fields`
 - `brief`
+
+补充约定：
+
+- `list_res` 的主语应是资源条目
+- 默认返回资源身份与来源映射，不默认展开资源值
 
 ## 检查类 Tool
 

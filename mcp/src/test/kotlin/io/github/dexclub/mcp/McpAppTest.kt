@@ -481,6 +481,170 @@ class McpAppTest {
         assertEquals("class-smali:Lsample/Test;", text)
     }
 
+    @Test
+    fun resolveResourceUsesSessionWorkspaceAndSupportsResourceId() {
+        val workspace = fakeWorkspaceContext()
+        val resourceService = FakeResourceService()
+        val app = McpApp(
+            services = Services(
+                workspace = FakeWorkspaceService(workspace),
+                dex = FakeDexAnalysisService(),
+                resource = resourceService,
+            ),
+            sessionStore = McpSessionStore(),
+        )
+        val session = app.openTargetSession("sample.apk")
+
+        val resource = app.resolveResource(
+            session = session,
+            resourceId = "0x7f010001",
+        )
+
+        assertEquals(workspace, resourceService.lastWorkspace)
+        assertEquals("0x7f010001", resourceService.lastResolveResourceRequest?.resourceId)
+        assertEquals("string", resource.type)
+        assertEquals("fixture_name", resource.name)
+        assertEquals("Fixture Name", resource.value)
+    }
+
+    @Test
+    fun resolveResourceUsesSessionWorkspaceAndSupportsTypeAndName() {
+        val workspace = fakeWorkspaceContext()
+        val resourceService = FakeResourceService()
+        val app = McpApp(
+            services = Services(
+                workspace = FakeWorkspaceService(workspace),
+                dex = FakeDexAnalysisService(),
+                resource = resourceService,
+            ),
+            sessionStore = McpSessionStore(),
+        )
+        val session = app.openTargetSession("sample.apk")
+
+        val resource = app.resolveResource(
+            session = session,
+            type = "string",
+            name = "fixture_name",
+        )
+
+        assertEquals(workspace, resourceService.lastWorkspace)
+        assertEquals("string", resourceService.lastResolveResourceRequest?.type)
+        assertEquals("fixture_name", resourceService.lastResolveResourceRequest?.name)
+        assertEquals("string", resource.type)
+        assertEquals("fixture_name", resource.name)
+    }
+
+    @Test
+    fun listResourcesUsesSessionWorkspaceAndSupportsTypeFilterAndWindow() {
+        val workspace = fakeWorkspaceContext()
+        val resourceService = FakeResourceService(
+            resourceEntries = listOf(
+                ResourceEntry(
+                    resourceId = "0x7f010001",
+                    type = "string",
+                    name = "alpha",
+                    filePath = "res/values/strings.xml",
+                    sourcePath = "sample.apk",
+                    sourceEntry = "res/values/strings.xml",
+                    resolution = io.github.dexclub.core.api.resource.ResourceResolution.TableBacked,
+                ),
+                ResourceEntry(
+                    resourceId = "0x7f010002",
+                    type = "layout",
+                    name = "main",
+                    filePath = "res/layout/main.xml",
+                    sourcePath = "sample.apk",
+                    sourceEntry = "res/layout/main.xml",
+                    resolution = io.github.dexclub.core.api.resource.ResourceResolution.TableBacked,
+                ),
+                ResourceEntry(
+                    resourceId = "0x7f010003",
+                    type = "string",
+                    name = "beta",
+                    filePath = "res/values/strings.xml",
+                    sourcePath = "sample.apk",
+                    sourceEntry = "res/values/strings.xml",
+                    resolution = io.github.dexclub.core.api.resource.ResourceResolution.TableBacked,
+                ),
+            ),
+        )
+        val app = McpApp(
+            services = Services(
+                workspace = FakeWorkspaceService(workspace),
+                dex = FakeDexAnalysisService(),
+                resource = resourceService,
+            ),
+            sessionStore = McpSessionStore(),
+        )
+        val session = app.openTargetSession("sample.apk")
+
+        val result = app.listResources(
+            session = session,
+            type = "string",
+            offset = 1,
+            limit = 1,
+        )
+
+        assertEquals(workspace, resourceService.lastWorkspace)
+        assertEquals(2, result.total)
+        assertEquals(1, result.items.size)
+        assertEquals("beta", result.items.single().name)
+    }
+
+    @Test
+    fun findResourcesUsesSessionWorkspaceAndMapsShortInputs() {
+        val workspace = fakeWorkspaceContext()
+        val resourceService = FakeResourceService(
+            resourceValueHits = listOf(
+                ResourceEntryValueHit(
+                    resourceId = "0x7f010001",
+                    type = "string",
+                    name = "alpha",
+                    value = "Needle Alpha",
+                    sourcePath = "sample.apk",
+                    sourceEntry = "resources.arsc",
+                ),
+                ResourceEntryValueHit(
+                    resourceId = "0x7f010002",
+                    type = "string",
+                    name = "beta",
+                    value = "Needle Beta",
+                    sourcePath = "sample.apk",
+                    sourceEntry = "resources.arsc",
+                ),
+            ),
+        )
+        val app = McpApp(
+            services = Services(
+                workspace = FakeWorkspaceService(workspace),
+                dex = FakeDexAnalysisService(),
+                resource = resourceService,
+            ),
+            sessionStore = McpSessionStore(),
+        )
+        val session = app.openTargetSession("sample.apk")
+
+        val result = app.findResources(
+            session = session,
+            type = "string",
+            value = "Needle",
+            contains = true,
+            ignoreCase = true,
+            offset = 1,
+            limit = 1,
+        )
+
+        assertEquals(workspace, resourceService.lastWorkspace)
+        val query = Json.parseToJsonElement(resourceService.lastFindResourcesRequest!!.queryText).jsonObject
+        assertEquals("string", query["type"]!!.jsonPrimitive.content)
+        assertEquals("Needle", query["value"]!!.jsonPrimitive.content)
+        assertEquals(true, query["contains"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(true, query["ignoreCase"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals(2, result.total)
+        assertEquals(1, result.items.size)
+        assertEquals("beta", result.items.single().name)
+    }
+
     private fun fakeWorkspaceContext(): WorkspaceContext =
         WorkspaceContext(
             workdir = "D:/tmp/workspace",
@@ -652,6 +816,18 @@ private class FakeDexAnalysisService(
 private class FakeResourceService : ResourceService {
     var lastWorkspace: WorkspaceContext? = null
     var lastInspectManifestRequest: InspectManifestRequest? = null
+    var lastResolveResourceRequest: ResolveResourceRequest? = null
+    var lastFindResourcesRequest: FindResourcesRequest? = null
+    private val resourceEntries: List<ResourceEntry>
+    private val resourceValueHits: List<ResourceEntryValueHit>
+
+    constructor(
+        resourceEntries: List<ResourceEntry> = emptyList(),
+        resourceValueHits: List<ResourceEntryValueHit> = emptyList(),
+    ) {
+        this.resourceEntries = resourceEntries
+        this.resourceValueHits = resourceValueHits
+    }
 
     override fun decodeManifest(workspace: WorkspaceContext): ManifestResult {
         lastWorkspace = workspace
@@ -697,13 +873,28 @@ private class FakeResourceService : ResourceService {
     override fun decodeXml(workspace: WorkspaceContext, request: DecodeXmlRequest): DecodedXmlResult =
         DecodedXmlResult(text = "<xml/>")
 
-    override fun listResourceEntries(workspace: WorkspaceContext): List<ResourceEntry> = emptyList()
+    override fun listResourceEntries(workspace: WorkspaceContext): List<ResourceEntry> =
+        resourceEntries.also {
+            lastWorkspace = workspace
+        }
 
     override fun resolveResourceValue(workspace: WorkspaceContext, request: ResolveResourceRequest): ResourceValue =
-        ResourceValue(type = "string", name = "name", value = null)
+        ResourceValue(
+            resourceId = request.resourceId ?: "0x7f010001",
+            type = request.type ?: "string",
+            name = request.name ?: "fixture_name",
+            value = "Fixture Name",
+        ).also {
+            lastWorkspace = workspace
+            lastResolveResourceRequest = request
+        }
 
     override fun findResourceEntries(
         workspace: WorkspaceContext,
         request: FindResourcesRequest,
-    ): List<ResourceEntryValueHit> = emptyList()
+    ): List<ResourceEntryValueHit> =
+        resourceValueHits.also {
+            lastWorkspace = workspace
+            lastFindResourcesRequest = request
+        }
 }

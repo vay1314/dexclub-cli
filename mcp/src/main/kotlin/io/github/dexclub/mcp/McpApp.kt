@@ -8,11 +8,11 @@ import io.github.dexclub.core.api.dex.ExportMethodSmaliRequest
 import io.github.dexclub.core.api.dex.InspectMethodRequest
 import io.github.dexclub.core.api.dex.MethodHit
 import io.github.dexclub.core.api.resource.InspectManifestRequest
+import io.github.dexclub.core.api.resource.ResolveResourceRequest
 import io.github.dexclub.core.api.shared.MethodSmaliMode
 import io.github.dexclub.core.api.shared.SourceLocator
 import io.github.dexclub.core.api.shared.Services
 import io.github.dexclub.core.api.shared.createDefaultServices
-import io.github.dexclub.core.api.workspace.WorkspaceContext
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.server.StdioServerTransport
@@ -326,6 +326,134 @@ internal class McpApp(
             findMethodsUsingStringsTool(request)
         }
 
+        server.addTool(
+            name = "list_res",
+            description = "列出当前 target 可见的资源条目索引。",
+            inputSchema = ToolSchema(
+                properties = buildJsonObject {
+                    put("session_id", buildJsonObject { put("type", "string") })
+                    put("type", buildJsonObject { put("type", "string") })
+                    put("offset", buildJsonObject { put("type", "integer") })
+                    put("limit", buildJsonObject { put("type", "integer") })
+                },
+                required = listOf("session_id"),
+            ),
+        ) { request ->
+            val session = resolveRequiredSession(request) ?: return@addTool missingSessionResult(request)
+            val type = request.optionalStringArgument("type")
+            val offset = request.intArgument("offset")
+            val limit = request.intArgument("limit")
+            val entries = try {
+                listResources(
+                    session = session,
+                    type = type,
+                    offset = offset,
+                    limit = limit,
+                )
+            } catch (cause: IllegalArgumentException) {
+                return@addTool errorResult(cause.message.orEmpty())
+            }
+            CallToolResult(
+                content = listOf(
+                    TextContent(
+                        json.encodeToString(
+                            ListResourcesResult.serializer(),
+                            session.toListResourcesResult(entries),
+                        ),
+                    ),
+                ),
+            )
+        }
+
+        server.addTool(
+            name = "find_res",
+            description = "按资源值搜索资源候选，仅支持 string/integer/bool/color。",
+            inputSchema = ToolSchema(
+                properties = buildJsonObject {
+                    put("session_id", buildJsonObject { put("type", "string") })
+                    put("type", buildJsonObject { put("type", "string") })
+                    put("value", buildJsonObject { put("type", "string") })
+                    put("contains", buildJsonObject { put("type", "boolean") })
+                    put("ignore_case", buildJsonObject { put("type", "boolean") })
+                    put("offset", buildJsonObject { put("type", "integer") })
+                    put("limit", buildJsonObject { put("type", "integer") })
+                },
+                required = listOf("session_id", "type", "value"),
+            ),
+        ) { request ->
+            val session = resolveRequiredSession(request) ?: return@addTool missingSessionResult(request)
+            val type = request.requiredStringArgument("type")
+            val value = request.requiredStringArgument("value")
+            if (type.isEmpty() || value.isEmpty()) {
+                return@addTool errorResult("type and value are required")
+            }
+            val contains = request.booleanArgument("contains") ?: false
+            val ignoreCase = request.booleanArgument("ignore_case") ?: false
+            val offset = request.intArgument("offset")
+            val limit = request.intArgument("limit")
+            val hits = try {
+                findResources(
+                    session = session,
+                    type = type,
+                    value = value,
+                    contains = contains,
+                    ignoreCase = ignoreCase,
+                    offset = offset,
+                    limit = limit,
+                )
+            } catch (cause: IllegalArgumentException) {
+                return@addTool errorResult(cause.message.orEmpty())
+            }
+            CallToolResult(
+                content = listOf(
+                    TextContent(
+                        json.encodeToString(
+                            FindResourcesResult.serializer(),
+                            session.toFindResourcesResult(hits),
+                        ),
+                    ),
+                ),
+            )
+        }
+
+        server.addTool(
+            name = "resolve_res",
+            description = "将资源 id 或 type/name 解析为结构化资源值。",
+            inputSchema = ToolSchema(
+                properties = buildJsonObject {
+                    put("session_id", buildJsonObject { put("type", "string") })
+                    put("resource_id", buildJsonObject { put("type", "string") })
+                    put("type", buildJsonObject { put("type", "string") })
+                    put("name", buildJsonObject { put("type", "string") })
+                },
+                required = listOf("session_id"),
+            ),
+        ) { request ->
+            val session = resolveRequiredSession(request) ?: return@addTool missingSessionResult(request)
+            val resourceId = request.optionalStringArgument("resource_id")
+            val type = request.optionalStringArgument("type")
+            val name = request.optionalStringArgument("name")
+            if (resourceId == null && (type == null || name == null)) {
+                return@addTool errorResult("resource_id or type+name is required")
+            }
+            val resource = resolveResource(
+                session = session,
+                resourceId = resourceId,
+                type = type,
+                name = name,
+            )
+            CallToolResult(
+                content = listOf(
+                    TextContent(
+                        json.encodeToString(
+                            ResolveResourceResult.serializer(),
+                            session.toResolveResourceResult(resource),
+                        ),
+                    ),
+                ),
+            )
+        }
+
         return server
     }
 
@@ -486,6 +614,9 @@ internal class McpApp(
     private fun CallToolRequest.requiredStringArgument(name: String): String =
         arguments?.get(name)?.jsonPrimitive?.content?.trim().orEmpty()
 
+    private fun CallToolRequest.optionalStringArgument(name: String): String? =
+        arguments?.get(name)?.jsonPrimitive?.content?.trim()?.ifEmpty { null }
+
     private fun CallToolRequest.stringArrayArgument(name: String): List<String> =
         (arguments?.get(name) as? JsonArray)
             ?.jsonArray
@@ -494,6 +625,9 @@ internal class McpApp(
 
     private fun CallToolRequest.intArgument(name: String): Int? =
         arguments?.get(name)?.jsonPrimitive?.content?.toIntOrNull()
+
+    private fun CallToolRequest.booleanArgument(name: String): Boolean? =
+        arguments?.get(name)?.jsonPrimitive?.content?.toBooleanStrictOrNull()
 
     internal fun openTargetSession(input: String): TargetSession {
         val workspace = services.workspace.initialize(input)
@@ -525,6 +659,20 @@ internal class McpApp(
     )
 
     internal fun getTargetSession(sessionId: String): TargetSession? = sessionStore.getTargetSession(sessionId)
+
+    internal fun resolveResource(
+        session: TargetSession,
+        resourceId: String? = null,
+        type: String? = null,
+        name: String? = null,
+    ) = services.resource.resolveResourceValue(
+        workspace = session.workspace,
+        request = ResolveResourceRequest(
+            resourceId = resourceId,
+            type = type,
+            name = name,
+        ),
+    )
 
     internal fun exportMethodJavaText(
         session: TargetSession,
@@ -582,6 +730,43 @@ internal class McpApp(
                 outputPath = it.toString(),
             ),
         )
+    }
+
+    internal fun listResources(
+        session: TargetSession,
+        type: String? = null,
+        offset: Int? = null,
+        limit: Int? = null,
+    ): WindowedResourceEntries {
+        val normalizedType = type?.trim()?.ifEmpty { null }
+        val filtered = services.resource.listResourceEntries(session.workspace)
+            .asSequence()
+            .filter { normalizedType == null || it.type == normalizedType }
+            .toList()
+        return applyWindow(filtered, offset, limit)
+    }
+
+    internal fun findResources(
+        session: TargetSession,
+        type: String,
+        value: String,
+        contains: Boolean = false,
+        ignoreCase: Boolean = false,
+        offset: Int? = null,
+        limit: Int? = null,
+    ): WindowedResourceValueHits {
+        require(type.isNotBlank()) { "type must not be blank" }
+        require(value.isNotBlank()) { "value must not be blank" }
+        val hits = services.resource.findResourceEntries(
+            workspace = session.workspace,
+            request = buildFindResourcesRequest(
+                type = type.trim(),
+                value = value,
+                contains = contains,
+                ignoreCase = ignoreCase,
+            ),
+        )
+        return applyWindow(hits, offset, limit)
     }
 
     internal fun exportClassSmaliText(

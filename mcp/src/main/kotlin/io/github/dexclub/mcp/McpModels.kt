@@ -14,6 +14,7 @@ import io.github.dexclub.core.api.shared.InputType
 import io.github.dexclub.core.api.shared.InventoryCounts
 import io.github.dexclub.core.api.shared.PageWindow
 import io.github.dexclub.core.api.shared.WorkspaceKind
+import io.github.dexclub.core.api.resource.FindResourcesRequest
 import io.github.dexclub.core.api.resource.ManifestApplicationInfo
 import io.github.dexclub.core.api.resource.ManifestComponentInfo
 import io.github.dexclub.core.api.resource.ManifestInspectionResult
@@ -23,6 +24,10 @@ import io.github.dexclub.core.api.resource.ManifestIntentFilter
 import io.github.dexclub.core.api.resource.ManifestMetaData
 import io.github.dexclub.core.api.resource.ManifestUsesFeature
 import io.github.dexclub.core.api.resource.ManifestUsesSdk
+import io.github.dexclub.core.api.resource.ResourceEntry
+import io.github.dexclub.core.api.resource.ResourceEntryValueHit
+import io.github.dexclub.core.api.resource.ResourceResolution
+import io.github.dexclub.core.api.resource.ResourceValue
 import io.github.dexclub.core.api.workspace.TargetHandle
 import io.github.dexclub.core.api.workspace.TargetSnapshotSummary
 import io.github.dexclub.core.api.workspace.WorkspaceContext
@@ -32,6 +37,8 @@ import io.github.dexclub.dexkit.query.StringMatchType
 import io.github.dexclub.dexkit.query.StringMatcher
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 @Serializable
 internal data class OpenTargetSessionResult(
@@ -74,6 +81,26 @@ internal data class FindMethodsUsingStringsResult(
     val items: List<MethodHitView>,
 )
 
+@Serializable
+internal data class ResolveResourceResult(
+    val sessionId: String,
+    val resource: ResourceValueView,
+)
+
+@Serializable
+internal data class ListResourcesResult(
+    val sessionId: String,
+    val total: Int,
+    val items: List<ResourceEntryView>,
+)
+
+@Serializable
+internal data class FindResourcesResult(
+    val sessionId: String,
+    val total: Int,
+    val items: List<ResourceEntryValueHitView>,
+)
+
 internal data class WindowedClassHits(
     val total: Int,
     val items: List<ClassHit>,
@@ -82,6 +109,16 @@ internal data class WindowedClassHits(
 internal data class WindowedMethodHits(
     val total: Int,
     val items: List<MethodHit>,
+)
+
+internal data class WindowedResourceEntries(
+    val total: Int,
+    val items: List<ResourceEntry>,
+)
+
+internal data class WindowedResourceValueHits(
+    val total: Int,
+    val items: List<ResourceEntryValueHit>,
 )
 
 @Serializable
@@ -174,6 +211,70 @@ internal data class MethodFieldUsageView(
     val usingType: FieldUsageType,
     val field: FieldHitView,
 )
+
+@Serializable
+internal data class ResourceValueView(
+    val resourceId: String? = null,
+    val type: String,
+    val name: String,
+    val value: String? = null,
+) {
+    companion object {
+        fun from(result: ResourceValue): ResourceValueView =
+            ResourceValueView(
+                resourceId = result.resourceId,
+                type = result.type,
+                name = result.name,
+                value = result.value,
+            )
+    }
+}
+
+@Serializable
+internal data class ResourceEntryView(
+    val resourceId: String? = null,
+    val type: String? = null,
+    val name: String? = null,
+    val filePath: String? = null,
+    val sourcePath: String? = null,
+    val sourceEntry: String? = null,
+    val resolution: String,
+) {
+    companion object {
+        fun from(entry: ResourceEntry): ResourceEntryView =
+            ResourceEntryView(
+                resourceId = entry.resourceId,
+                type = entry.type,
+                name = entry.name,
+                filePath = entry.filePath,
+                sourcePath = entry.sourcePath,
+                sourceEntry = entry.sourceEntry,
+                resolution = entry.resolution.toMcpValue(),
+            )
+    }
+}
+
+@Serializable
+internal data class ResourceEntryValueHitView(
+    val resourceId: String? = null,
+    val type: String? = null,
+    val name: String? = null,
+    val value: String? = null,
+    val sourcePath: String? = null,
+    val sourceEntry: String? = null,
+) {
+    companion object {
+        fun from(hit: ResourceEntryValueHit): ResourceEntryValueHitView =
+            ResourceEntryValueHitView(
+                resourceId = hit.resourceId,
+                type = hit.type,
+                name = hit.name,
+                value = hit.value,
+                sourcePath = hit.sourcePath,
+                sourceEntry = hit.sourceEntry,
+            )
+    }
+}
 
 @Serializable
 internal data class ManifestInspectionView(
@@ -342,6 +443,26 @@ internal fun TargetSession.toFindMethodsUsingStringsResult(result: WindowedMetho
         sessionId = sessionId,
         total = result.total,
         items = result.items.map(MethodHit::toView),
+    )
+
+internal fun TargetSession.toResolveResourceResult(result: io.github.dexclub.core.api.resource.ResourceValue): ResolveResourceResult =
+    ResolveResourceResult(
+        sessionId = sessionId,
+        resource = ResourceValueView.from(result),
+    )
+
+internal fun TargetSession.toListResourcesResult(result: WindowedResourceEntries): ListResourcesResult =
+    ListResourcesResult(
+        sessionId = sessionId,
+        total = result.total,
+        items = result.items.map(ResourceEntryView::from),
+    )
+
+internal fun TargetSession.toFindResourcesResult(result: WindowedResourceValueHits): FindResourcesResult =
+    FindResourcesResult(
+        sessionId = sessionId,
+        total = result.total,
+        items = result.items.map(ResourceEntryValueHitView::from),
     )
 
 internal fun WorkspaceContext.toView(): WorkspaceContextView =
@@ -550,6 +671,22 @@ internal fun buildFindClassesUsingStringsRequest(
         window = PageWindow(),
     )
 
+internal fun buildFindResourcesRequest(
+    type: String,
+    value: String,
+    contains: Boolean,
+    ignoreCase: Boolean,
+): FindResourcesRequest =
+    FindResourcesRequest(
+        queryText = buildJsonObject {
+            put("type", type)
+            put("value", value)
+            put("contains", contains)
+            put("ignoreCase", ignoreCase)
+        }.toString(),
+        window = PageWindow(),
+    )
+
 private fun buildStringMatcherQuery(
     query: BatchFindMethodUsingStrings,
     strings: List<String>,
@@ -598,6 +735,27 @@ internal fun applyWindow(items: List<ClassHit>, offset: Int? = null, limit: Int?
 internal fun applyWindow(items: List<MethodHit>, offset: Int? = null, limit: Int? = null): WindowedMethodHits =
     applyWindowSlice(items, offset, limit) { total, slice ->
         WindowedMethodHits(total = total, items = slice)
+    }
+
+internal fun applyWindow(items: List<ResourceEntry>, offset: Int? = null, limit: Int? = null): WindowedResourceEntries =
+    applyWindowSlice(items, offset, limit) { total, slice ->
+        WindowedResourceEntries(total = total, items = slice)
+    }
+
+internal fun applyWindow(
+    items: List<ResourceEntryValueHit>,
+    offset: Int? = null,
+    limit: Int? = null,
+): WindowedResourceValueHits =
+    applyWindowSlice(items, offset, limit) { total, slice ->
+        WindowedResourceValueHits(total = total, items = slice)
+    }
+
+private fun ResourceResolution.toMcpValue(): String =
+    when (this) {
+        ResourceResolution.TableBacked -> "table-backed"
+        ResourceResolution.PathInferred -> "path-inferred"
+        ResourceResolution.Unresolved -> "unresolved"
     }
 
 private fun <T, R> applyWindowSlice(
