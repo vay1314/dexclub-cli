@@ -221,6 +221,48 @@ class McpAppTest {
     }
 
     @Test
+    fun inspectMethodBriefReturnsCountsWithoutExpandedSections() {
+        val session = McpSessionStore().openTargetSession(fakeWorkspaceContext())
+        val result = session.toInspectMethodResult(
+            detail = MethodDetail(
+                method = MethodHit(
+                    className = "Lsample/Test;",
+                    methodName = "foo",
+                    descriptor = "Lsample/Test;->foo()V",
+                ),
+                usingFields = emptyList(),
+                callers = listOf(
+                    MethodHit(
+                        className = "Lcaller/Test;",
+                        methodName = "call",
+                        descriptor = "Lcaller/Test;->call()V",
+                    ),
+                ),
+                invokes = listOf(
+                    MethodHit(
+                        className = "Lcallee/Test;",
+                        methodName = "run",
+                        descriptor = "Lcallee/Test;->run()V",
+                    ),
+                ),
+                strings = listOf("alpha", "beta"),
+                annotations = listOf("Lsample/Anno;"),
+            ),
+            brief = true,
+        )
+
+        assertEquals(0, result.detail.counts?.usingFields)
+        assertEquals(1, result.detail.counts?.callers)
+        assertEquals(1, result.detail.counts?.invokes)
+        assertEquals(2, result.detail.counts?.strings)
+        assertEquals(1, result.detail.counts?.annotations)
+        assertEquals(null, result.detail.callers)
+        assertEquals(null, result.detail.invokes)
+        assertEquals(null, result.detail.strings)
+        assertEquals(null, result.detail.annotations)
+    }
+
+    @Test
     fun findMethodsUsingStringsUsesSessionWorkspaceAndMapsShortInputs() {
         val workspace = fakeWorkspaceContext()
         val workspaceService = FakeWorkspaceService(workspace)
@@ -344,6 +386,37 @@ class McpAppTest {
         assertEquals(10, hits.limit)
         assertEquals(false, hits.hasMore)
         assertEquals("Lfixture/samples/SampleSearchTarget;->exposeNeedle()Ljava/lang/String;", hits.items.single().descriptor)
+    }
+
+    @Test
+    fun findMethodsResultSupportsFieldProjectionAndBrief() {
+        val session = McpSessionStore().openTargetSession(fakeWorkspaceContext())
+        val result = session.toFindMethodsResult(
+            result = WindowedItems(
+                total = 2,
+                offset = 0,
+                limit = 1,
+                hasMore = true,
+                items = listOf(
+                    MethodHit(
+                        className = "fixture.samples.SampleSearchTarget",
+                        methodName = "exposeNeedle",
+                        descriptor = "Lfixture/samples/SampleSearchTarget;->exposeNeedle()Ljava/lang/String;",
+                        sourcePath = "fixture.dex",
+                        sourceEntry = "classes.dex",
+                    ),
+                ),
+            ),
+            fields = setOf("descriptor"),
+            brief = true,
+        )
+
+        val item = result.items.single()
+        assertEquals("Lfixture/samples/SampleSearchTarget;->exposeNeedle()Ljava/lang/String;", item["descriptor"]!!.jsonPrimitive.content)
+        assertEquals(setOf("descriptor"), item.keys)
+        assertEquals(0, result.offset)
+        assertEquals(1, result.limit)
+        assertEquals(true, result.hasMore)
     }
 
     @Test

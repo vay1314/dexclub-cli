@@ -44,6 +44,7 @@ internal class McpApp(
     private val json = Json {
         prettyPrint = false
         encodeDefaults = true
+        explicitNulls = false
     }
 
     fun createServer(): Server {
@@ -99,6 +100,7 @@ internal class McpApp(
                             put("items", buildJsonObject { put("type", "string") })
                         },
                     )
+                    put("brief", buildJsonObject { put("type", "boolean") })
                 },
                 required = listOf("session_id", "descriptor"),
             ),
@@ -124,6 +126,7 @@ internal class McpApp(
                     isError = true,
                 )
             }
+            val brief = request.booleanArgument("brief") ?: false
 
             val detail = inspectMethod(
                 session = session,
@@ -135,7 +138,7 @@ internal class McpApp(
                     TextContent(
                         json.encodeToString(
                             InspectMethodResult.serializer(),
-                            session.toInspectMethodResult(detail),
+                            session.toInspectMethodResult(detail, brief = brief),
                         ),
                     ),
                 ),
@@ -279,6 +282,14 @@ internal class McpApp(
                     put("descriptor_contains", buildJsonObject { put("type", "string") })
                     put("offset", buildJsonObject { put("type", "integer") })
                     put("limit", buildJsonObject { put("type", "integer") })
+                    put(
+                        "fields",
+                        buildJsonObject {
+                            put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
+                        },
+                    )
+                    put("brief", buildJsonObject { put("type", "boolean") })
                 },
                 required = listOf("session_id"),
             ),
@@ -289,6 +300,15 @@ internal class McpApp(
             val descriptorContains = request.optionalStringArgument("descriptor_contains")
             val offset = request.intArgument("offset")
             val limit = request.intArgument("limit")
+            val brief = request.booleanArgument("brief") ?: false
+            val fields = try {
+                parseRequestedFields(
+                    request.stringArrayArgument("fields"),
+                    supported = methodFieldNames,
+                )
+            } catch (cause: IllegalArgumentException) {
+                return@addTool errorResult(cause.message.orEmpty())
+            }
             val hits = try {
                 findMethods(
                     session = session,
@@ -306,7 +326,7 @@ internal class McpApp(
                     TextContent(
                         json.encodeToString(
                             FindMethodsResult.serializer(),
-                            session.toFindMethodsResult(hits),
+                            session.toFindMethodsResult(hits, fields = fields, brief = brief),
                         ),
                     ),
                 ),
@@ -335,6 +355,14 @@ internal class McpApp(
                     )
                     put("offset", buildJsonObject { put("type", "integer") })
                     put("limit", buildJsonObject { put("type", "integer") })
+                    put(
+                        "fields",
+                        buildJsonObject {
+                            put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
+                        },
+                    )
+                    put("brief", buildJsonObject { put("type", "boolean") })
                 },
                 required = listOf("session_id"),
             ),
@@ -364,6 +392,14 @@ internal class McpApp(
                     )
                     put("offset", buildJsonObject { put("type", "integer") })
                     put("limit", buildJsonObject { put("type", "integer") })
+                    put(
+                        "fields",
+                        buildJsonObject {
+                            put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
+                        },
+                    )
+                    put("brief", buildJsonObject { put("type", "boolean") })
                 },
                 required = listOf("session_id"),
             ),
@@ -380,6 +416,14 @@ internal class McpApp(
                     put("type", buildJsonObject { put("type", "string") })
                     put("offset", buildJsonObject { put("type", "integer") })
                     put("limit", buildJsonObject { put("type", "integer") })
+                    put(
+                        "fields",
+                        buildJsonObject {
+                            put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
+                        },
+                    )
+                    put("brief", buildJsonObject { put("type", "boolean") })
                 },
                 required = listOf("session_id"),
             ),
@@ -388,6 +432,15 @@ internal class McpApp(
             val type = request.optionalStringArgument("type")
             val offset = request.intArgument("offset")
             val limit = request.intArgument("limit")
+            val brief = request.booleanArgument("brief") ?: false
+            val fields = try {
+                parseRequestedFields(
+                    request.stringArrayArgument("fields"),
+                    supported = resourceEntryFieldNames,
+                )
+            } catch (cause: IllegalArgumentException) {
+                return@addTool errorResult(cause.message.orEmpty())
+            }
             val entries = try {
                 listResources(
                     session = session,
@@ -403,7 +456,7 @@ internal class McpApp(
                     TextContent(
                         json.encodeToString(
                             ListResourcesResult.serializer(),
-                            session.toListResourcesResult(entries),
+                            session.toListResourcesResult(entries, fields = fields, brief = brief),
                         ),
                     ),
                 ),
@@ -422,6 +475,14 @@ internal class McpApp(
                     put("ignore_case", buildJsonObject { put("type", "boolean") })
                     put("offset", buildJsonObject { put("type", "integer") })
                     put("limit", buildJsonObject { put("type", "integer") })
+                    put(
+                        "fields",
+                        buildJsonObject {
+                            put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
+                        },
+                    )
+                    put("brief", buildJsonObject { put("type", "boolean") })
                 },
                 required = listOf("session_id", "type", "value"),
             ),
@@ -436,6 +497,15 @@ internal class McpApp(
             val ignoreCase = request.booleanArgument("ignore_case") ?: false
             val offset = request.intArgument("offset")
             val limit = request.intArgument("limit")
+            val brief = request.booleanArgument("brief") ?: false
+            val fields = try {
+                parseRequestedFields(
+                    request.stringArrayArgument("fields"),
+                    supported = resourceValueFieldNames,
+                )
+            } catch (cause: IllegalArgumentException) {
+                return@addTool errorResult(cause.message.orEmpty())
+            }
             val hits = try {
                 findResourceValues(
                     session = session,
@@ -454,7 +524,7 @@ internal class McpApp(
                     TextContent(
                         json.encodeToString(
                             FindResourcesResult.serializer(),
-                            session.toFindResourcesResult(hits),
+                            session.toFindResourcesResult(hits, fields = fields, brief = brief),
                         ),
                     ),
                 ),
@@ -587,8 +657,9 @@ internal class McpApp(
         findStringAnchoredItems(
             request = request,
             finder = ::findClassesUsingStrings,
-            renderer = { session, items ->
-                FindClassesUsingStringsResult.serializer() to session.toFindClassesUsingStringsResult(items)
+            supportedFields = classFieldNames,
+            renderer = { session, items, fields, brief ->
+                FindClassesUsingStringsResult.serializer() to session.toFindClassesUsingStringsResult(items, fields = fields, brief = brief)
             },
         )
 
@@ -596,21 +667,32 @@ internal class McpApp(
         findStringAnchoredItems(
             request = request,
             finder = ::findMethodsUsingStrings,
-            renderer = { session, items ->
-                FindMethodsUsingStringsResult.serializer() to session.toFindMethodsUsingStringsResult(items)
+            supportedFields = methodFieldNames,
+            renderer = { session, items, fields, brief ->
+                FindMethodsUsingStringsResult.serializer() to session.toFindMethodsUsingStringsResult(items, fields = fields, brief = brief)
             },
         )
 
     private fun <T, S> findStringAnchoredItems(
         request: CallToolRequest,
         finder: (TargetSession, List<String>, List<String>, Int?, Int?) -> T,
-        renderer: (TargetSession, T) -> Pair<kotlinx.serialization.KSerializer<S>, S>,
+        supportedFields: Set<String>,
+        renderer: (TargetSession, T, Set<String>?, Boolean) -> Pair<kotlinx.serialization.KSerializer<S>, S>,
     ): CallToolResult {
         val session = resolveRequiredSession(request) ?: return missingSessionResult(request)
         val containsAnyStrings = request.stringArrayArgument("contains_any_strings")
         val containsAllStrings = request.stringArrayArgument("contains_all_strings")
         val offset = request.intArgument("offset")
         val limit = request.intArgument("limit")
+        val brief = request.booleanArgument("brief") ?: false
+        val fields = try {
+            parseRequestedFields(
+                request.stringArrayArgument("fields"),
+                supported = supportedFields,
+            )
+        } catch (cause: IllegalArgumentException) {
+            return errorResult(cause.message.orEmpty())
+        }
 
         val items = try {
             finder(session, containsAnyStrings, containsAllStrings, offset, limit)
@@ -618,7 +700,7 @@ internal class McpApp(
             return errorResult(cause.message.orEmpty())
         }
 
-        val (serializer, payload) = renderer(session, items)
+        val (serializer, payload) = renderer(session, items, fields, brief)
         return CallToolResult(
             content = listOf(TextContent(json.encodeToString(serializer, payload))),
         )
