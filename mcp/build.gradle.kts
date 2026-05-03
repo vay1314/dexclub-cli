@@ -16,6 +16,7 @@ dependencies {
     implementation(project(":core"))
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.mcp.kotlin.sdk.server)
+    runtimeOnly(libs.slf4j.simple)
 
     testImplementation(kotlin("test"))
     testImplementation(project(":dexkit"))

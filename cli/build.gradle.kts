@@ -46,6 +46,7 @@ fun resolveCliVersion(): String {
 dependencies {
     implementation(project(":core"))
     implementation(libs.kotlinx.serialization.json)
+    runtimeOnly(libs.slf4j.simple)
 
     testImplementation(kotlin("test"))
 }

@@ -736,7 +736,7 @@ class DefaultResourceServiceTest {
             .resourceId
             ?: error("缺少资源 id")
 
-        val result = services.resource.resolveResourceValue(
+        val result = services.resource.getResourceValue(
             workspace,
             ResolveResourceRequest(resourceId = resourceId),
         )
@@ -765,7 +765,7 @@ class DefaultResourceServiceTest {
         services.workspace.initialize(apkFile.toString())
         val workspace = services.workspace.open(WorkspaceRef(workdir.toString()))
 
-        val result = services.resource.resolveResourceValue(
+        val result = services.resource.getResourceValue(
             workspace,
             ResolveResourceRequest(
                 type = "string",
@@ -802,7 +802,7 @@ class DefaultResourceServiceTest {
             Charsets.UTF_8,
         )
 
-        val result = services.resource.resolveResourceValue(
+        val result = services.resource.getResourceValue(
             workspace,
             ResolveResourceRequest(type = "string", name = "app_name"),
         )
@@ -820,7 +820,7 @@ class DefaultResourceServiceTest {
         val workspace = services.workspace.open(WorkspaceRef(workdir.toString()))
 
         val error = assertFailsWith<CapabilityError> {
-            services.resource.resolveResourceValue(
+            services.resource.getResourceValue(
                 workspace,
                 ResolveResourceRequest(type = "string", name = "app_name"),
             )
@@ -850,7 +850,7 @@ class DefaultResourceServiceTest {
         services.workspace.initialize(apkFile.toString())
         val workspace = services.workspace.open(WorkspaceRef(workdir.toString()))
 
-        val hits = services.resource.findResourceEntries(
+        val hits = services.resource.findResourceValues(
             workspace,
             FindResourcesRequest(
                 queryText = """{"type":"string","value":"login","contains":true,"ignoreCase":true}""",
@@ -891,7 +891,7 @@ class DefaultResourceServiceTest {
             Charsets.UTF_8,
         )
 
-        val hits = services.resource.findResourceEntries(
+        val hits = services.resource.findResourceValues(
             workspace,
             FindResourcesRequest(queryText = """{"type":"string","value":"cache only","contains":true,"ignoreCase":true}"""),
         )
@@ -911,7 +911,7 @@ class DefaultResourceServiceTest {
         val workspace = services.workspace.open(WorkspaceRef(workdir.toString()))
 
         val error = assertFailsWith<CapabilityError> {
-            services.resource.findResourceEntries(
+            services.resource.findResourceValues(
                 workspace,
                 FindResourcesRequest(queryText = """{"type":"string","value":"login"}"""),
             )

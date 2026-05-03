@@ -41,7 +41,6 @@ kotlin {
             implementation(libs.jadx.core)
             implementation(libs.jadx.dex.input)
             implementation(libs.jadx.kotlin.metadata)
-            implementation(libs.logback.classic)
         }
 
         commonTest.dependencies {
