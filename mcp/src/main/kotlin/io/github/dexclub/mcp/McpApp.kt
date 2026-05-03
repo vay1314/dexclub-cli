@@ -1,6 +1,7 @@
 package io.github.dexclub.mcp
 
 import io.github.dexclub.core.api.dex.InspectMethodRequest
+import io.github.dexclub.core.api.dex.MethodHit
 import io.github.dexclub.core.api.shared.Services
 import io.github.dexclub.core.api.shared.createDefaultServices
 import io.github.dexclub.core.api.workspace.WorkspaceContext
@@ -139,6 +140,83 @@ internal class McpApp(
             )
         }
 
+        server.addTool(
+            name = "find_methods_using_strings",
+            description = "使用字符串锚点定位方法候选。",
+            inputSchema = ToolSchema(
+                properties = buildJsonObject {
+                    put("session_id", buildJsonObject { put("type", "string") })
+                    put(
+                        "contains_any_strings",
+                        buildJsonObject {
+                            put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
+                        },
+                    )
+                    put(
+                        "contains_all_strings",
+                        buildJsonObject {
+                            put("type", "array")
+                            put("items", buildJsonObject { put("type", "string") })
+                        },
+                    )
+                    put("offset", buildJsonObject { put("type", "integer") })
+                    put("limit", buildJsonObject { put("type", "integer") })
+                },
+                required = listOf("session_id"),
+            ),
+        ) { request ->
+            val sessionId = request.arguments?.get("session_id")?.jsonPrimitive?.content?.trim().orEmpty()
+            if (sessionId.isEmpty()) {
+                return@addTool CallToolResult(
+                    content = listOf(TextContent("""{"error":"session_id is required"}""")),
+                    isError = true,
+                )
+            }
+            val session = sessionStore.getTargetSession(sessionId)
+                ?: return@addTool CallToolResult(
+                    content = listOf(TextContent("""{"error":"target session not found"}""")),
+                    isError = true,
+                )
+
+            val containsAnyStrings = (request.arguments?.get("contains_any_strings") as? JsonArray)
+                ?.jsonArray
+                ?.map { it.jsonPrimitive.content }
+                .orEmpty()
+            val containsAllStrings = (request.arguments?.get("contains_all_strings") as? JsonArray)
+                ?.jsonArray
+                ?.map { it.jsonPrimitive.content }
+                .orEmpty()
+            val offset = request.arguments?.get("offset")?.jsonPrimitive?.content?.toIntOrNull()
+            val limit = request.arguments?.get("limit")?.jsonPrimitive?.content?.toIntOrNull()
+
+            val items = try {
+                findMethodsUsingStrings(
+                    session = session,
+                    containsAnyStrings = containsAnyStrings,
+                    containsAllStrings = containsAllStrings,
+                    offset = offset,
+                    limit = limit,
+                )
+            } catch (cause: IllegalArgumentException) {
+                return@addTool CallToolResult(
+                    content = listOf(TextContent("""{"error":"${cause.message}"}""")),
+                    isError = true,
+                )
+            }
+
+            CallToolResult(
+                content = listOf(
+                    TextContent(
+                        json.encodeToString(
+                            FindMethodsUsingStringsResult.serializer(),
+                            session.toFindMethodsUsingStringsResult(items),
+                        ),
+                    ),
+                ),
+            )
+        }
+
         return server
     }
 
@@ -170,4 +248,61 @@ internal class McpApp(
     )
 
     internal fun getTargetSession(sessionId: String): TargetSession? = sessionStore.getTargetSession(sessionId)
+
+    internal fun findMethodsUsingStrings(
+        session: TargetSession,
+        containsAnyStrings: List<String>,
+        containsAllStrings: List<String>,
+        offset: Int? = null,
+        limit: Int? = null,
+    ): WindowedMethodHits {
+        if (containsAnyStrings.isEmpty() && containsAllStrings.isEmpty()) {
+            throw IllegalArgumentException("At least one string filter is required")
+        }
+
+        val anyHits = if (containsAnyStrings.isNotEmpty()) {
+            services.dex.findMethodsUsingStrings(
+                workspace = session.workspace,
+                request = buildFindMethodsUsingStringsRequest(
+                    strings = containsAnyStrings,
+                    requireAll = false,
+                ),
+            )
+        } else {
+            emptyList()
+        }
+
+        val allHits = if (containsAllStrings.isNotEmpty()) {
+            services.dex.findMethodsUsingStrings(
+                workspace = session.workspace,
+                request = buildFindMethodsUsingStringsRequest(
+                    strings = containsAllStrings,
+                    requireAll = true,
+                ),
+            )
+        } else {
+            emptyList()
+        }
+
+        val combined = when {
+            containsAnyStrings.isNotEmpty() && containsAllStrings.isNotEmpty() ->
+                anyHits.intersect(allHits.toSet()).toList()
+            containsAnyStrings.isNotEmpty() -> anyHits
+            else -> allHits
+        }.sortedWith(
+            compareBy<MethodHit>(
+                { it.className },
+                { it.methodName },
+                { it.descriptor },
+                { it.sourcePath.orEmpty() },
+                { it.sourceEntry.orEmpty() },
+            ),
+        )
+
+        return applyWindow(
+            items = combined,
+            offset = offset,
+            limit = limit,
+        )
+    }
 }

@@ -1,6 +1,7 @@
 package io.github.dexclub.mcp
 
 import io.github.dexclub.core.api.dex.ClassHit
+import io.github.dexclub.core.api.dex.FindMethodsUsingStringsRequest
 import io.github.dexclub.core.api.dex.FieldHit
 import io.github.dexclub.core.api.dex.FieldUsageType
 import io.github.dexclub.core.api.dex.MethodDetail
@@ -10,10 +11,14 @@ import io.github.dexclub.core.api.dex.MethodHit
 import io.github.dexclub.core.api.shared.CapabilitySet
 import io.github.dexclub.core.api.shared.InputType
 import io.github.dexclub.core.api.shared.InventoryCounts
+import io.github.dexclub.core.api.shared.PageWindow
 import io.github.dexclub.core.api.shared.WorkspaceKind
 import io.github.dexclub.core.api.workspace.TargetHandle
 import io.github.dexclub.core.api.workspace.TargetSnapshotSummary
 import io.github.dexclub.core.api.workspace.WorkspaceContext
+import io.github.dexclub.dexkit.query.BatchFindMethodUsingStrings
+import io.github.dexclub.dexkit.query.StringMatchType
+import io.github.dexclub.dexkit.query.StringMatcher
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -27,6 +32,18 @@ internal data class OpenTargetSessionResult(
 internal data class InspectMethodResult(
     val sessionId: String,
     val detail: MethodDetailView,
+)
+
+@Serializable
+internal data class FindMethodsUsingStringsResult(
+    val sessionId: String,
+    val total: Int,
+    val items: List<MethodHitView>,
+)
+
+internal data class WindowedMethodHits(
+    val total: Int,
+    val items: List<MethodHit>,
 )
 
 @Serializable
@@ -140,6 +157,13 @@ internal fun TargetSession.toInspectMethodResult(detail: MethodDetail): InspectM
         detail = detail.toView(),
     )
 
+internal fun TargetSession.toFindMethodsUsingStringsResult(result: WindowedMethodHits): FindMethodsUsingStringsResult =
+    FindMethodsUsingStringsResult(
+        sessionId = sessionId,
+        total = result.total,
+        items = result.items.map(MethodHit::toView),
+    )
+
 internal fun WorkspaceContext.toView(): WorkspaceContextView =
     WorkspaceContextView(
         workdir = workdir,
@@ -223,3 +247,54 @@ internal fun MethodFieldUsage.toView(): MethodFieldUsageView =
         usingType = usingType,
         field = field.toView(),
     )
+
+internal fun buildFindMethodsUsingStringsRequest(
+    strings: List<String>,
+    requireAll: Boolean,
+): FindMethodsUsingStringsRequest {
+    val query = BatchFindMethodUsingStrings().apply {
+        val normalized = strings.filter { it.isNotBlank() }
+        if (requireAll) {
+            if (normalized.isNotEmpty()) {
+                groups["all"] = normalized.map { value ->
+                    StringMatcher(value = value, matchType = StringMatchType.Contains)
+                }
+            }
+        } else {
+            normalized.forEachIndexed { index, value ->
+                groups["any-$index"] = listOf(
+                    StringMatcher(value = value, matchType = StringMatchType.Contains),
+                )
+            }
+        }
+    }
+
+    if (query.groups.isEmpty()) {
+        throw IllegalArgumentException("At least one non-blank string filter is required")
+    }
+
+    return FindMethodsUsingStringsRequest(
+        queryText = kotlinx.serialization.json.Json.encodeToString(
+            BatchFindMethodUsingStrings.serializer(),
+            query,
+        ),
+        window = PageWindow(),
+    )
+}
+
+internal fun applyWindow(items: List<MethodHit>, offset: Int? = null, limit: Int? = null): WindowedMethodHits {
+    val normalizedOffset = offset ?: 0
+    require(normalizedOffset >= 0) { "offset must be non-negative" }
+    require(limit == null || limit > 0) { "limit must be positive when specified" }
+    if (normalizedOffset >= items.size) {
+        return WindowedMethodHits(
+            total = items.size,
+            items = emptyList(),
+        )
+    }
+    val toIndex = if (limit == null) items.size else minOf(items.size, normalizedOffset + limit)
+    return WindowedMethodHits(
+        total = items.size,
+        items = items.subList(normalizedOffset, toIndex),
+    )
+}

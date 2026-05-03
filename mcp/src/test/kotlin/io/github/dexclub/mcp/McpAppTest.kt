@@ -46,8 +46,13 @@ import io.github.dexclub.core.api.workspace.WorkspaceContext
 import io.github.dexclub.core.api.workspace.WorkspaceRef
 import io.github.dexclub.core.api.workspace.WorkspaceService
 import io.github.dexclub.core.api.workspace.WorkspaceStatus
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class McpAppTest {
     @Test
@@ -134,6 +139,82 @@ class McpAppTest {
         assertEquals(MethodDetailSection.entries.toSet(), sections)
     }
 
+    @Test
+    fun findMethodsUsingStringsUsesSessionWorkspaceAndMapsShortInputs() {
+        val workspace = fakeWorkspaceContext()
+        val workspaceService = FakeWorkspaceService(workspace)
+        val dexService = FakeDexAnalysisService(
+            findMethodsUsingStringsResponses = listOf(
+                listOf(
+                    MethodHit(
+                        className = "fixture.samples.SampleSearchTarget",
+                        methodName = "exposeNeedle",
+                        descriptor = "Lfixture/samples/SampleSearchTarget;->exposeNeedle()Ljava/lang/String;",
+                        sourcePath = "fixture.dex",
+                        sourceEntry = null,
+                    ),
+                    MethodHit(
+                        className = "fixture.samples.OtherTarget",
+                        methodName = "secondary",
+                        descriptor = "Lfixture/samples/OtherTarget;->secondary()V",
+                        sourcePath = "fixture.dex",
+                        sourceEntry = null,
+                    ),
+                ),
+                listOf(
+                    MethodHit(
+                        className = "fixture.samples.SampleSearchTarget",
+                        methodName = "exposeNeedle",
+                        descriptor = "Lfixture/samples/SampleSearchTarget;->exposeNeedle()Ljava/lang/String;",
+                        sourcePath = "fixture.dex",
+                        sourceEntry = null,
+                    ),
+                ),
+            ),
+        )
+        val app = McpApp(
+            services = Services(
+                workspace = workspaceService,
+                dex = dexService,
+                resource = FakeResourceService(),
+            ),
+            sessionStore = McpSessionStore(),
+        )
+        val session = app.openTargetSession("sample.apk")
+
+        val hits = app.findMethodsUsingStrings(
+            session = session,
+            containsAnyStrings = listOf("needle-a", "needle-b"),
+            containsAllStrings = listOf("must-have"),
+            offset = 1,
+            limit = 5,
+        )
+
+        assertEquals(workspace, dexService.lastWorkspace)
+        assertEquals(2, dexService.findMethodsUsingStringsRequests.size)
+        val anyQuery = Json.parseToJsonElement(dexService.findMethodsUsingStringsRequests[0].queryText).jsonObject["groups"]!!.jsonObject
+        assertEquals(1, anyQuery["any-0"]!!.jsonArray.size)
+        assertEquals("needle-a", anyQuery["any-0"]!!.jsonArray[0].jsonObject["value"]!!.jsonPrimitive.content)
+        assertEquals("needle-b", anyQuery["any-1"]!!.jsonArray[0].jsonObject["value"]!!.jsonPrimitive.content)
+        val allQuery = Json.parseToJsonElement(dexService.findMethodsUsingStringsRequests[1].queryText).jsonObject["groups"]!!.jsonObject
+        assertEquals(1, allQuery["all"]!!.jsonArray.size)
+        assertEquals("must-have", allQuery["all"]!!.jsonArray[0].jsonObject["value"]!!.jsonPrimitive.content)
+        assertEquals(1, hits.total)
+        assertTrue(hits.items.isEmpty())
+    }
+
+    @Test
+    fun buildFindMethodsUsingStringsRequestRejectsEmptyFilters() {
+        val error = kotlin.test.assertFailsWith<IllegalArgumentException> {
+            buildFindMethodsUsingStringsRequest(
+                strings = emptyList(),
+                requireAll = false,
+            )
+        }
+
+        assertEquals("At least one non-blank string filter is required", error.message)
+    }
+
     private fun fakeWorkspaceContext(): WorkspaceContext =
         WorkspaceContext(
             workdir = "D:/tmp/workspace",
@@ -217,9 +298,12 @@ private class FakeDexAnalysisService(
             descriptor = "Lsample/Test;->foo()V",
         ),
     ),
+    private val findMethodsUsingStringsResponses: List<List<MethodHit>> = emptyList(),
 ) : DexAnalysisService {
     var lastWorkspace: WorkspaceContext? = null
     var lastInspectRequest: InspectMethodRequest? = null
+    var lastFindMethodsUsingStringsRequest: FindMethodsUsingStringsRequest? = null
+    val findMethodsUsingStringsRequests = mutableListOf<FindMethodsUsingStringsRequest>()
 
     override fun findClasses(workspace: WorkspaceContext, request: FindClassesRequest): List<ClassHit> = emptyList()
 
@@ -235,7 +319,13 @@ private class FakeDexAnalysisService(
     override fun findMethodsUsingStrings(
         workspace: WorkspaceContext,
         request: FindMethodsUsingStringsRequest,
-    ): List<MethodHit> = emptyList()
+    ): List<MethodHit> {
+        lastWorkspace = workspace
+        lastFindMethodsUsingStringsRequest = request
+        findMethodsUsingStringsRequests += request
+        val nextIndex = findMethodsUsingStringsRequests.size - 1
+        return findMethodsUsingStringsResponses.getOrElse(nextIndex) { emptyList() }
+    }
 
     override fun inspectMethod(workspace: WorkspaceContext, request: InspectMethodRequest): MethodDetail {
         lastWorkspace = workspace
