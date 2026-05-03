@@ -1,0 +1,225 @@
+package io.github.dexclub.mcp
+
+import io.github.dexclub.core.api.dex.ClassHit
+import io.github.dexclub.core.api.dex.FieldHit
+import io.github.dexclub.core.api.dex.FieldUsageType
+import io.github.dexclub.core.api.dex.MethodDetail
+import io.github.dexclub.core.api.dex.MethodDetailSection
+import io.github.dexclub.core.api.dex.MethodFieldUsage
+import io.github.dexclub.core.api.dex.MethodHit
+import io.github.dexclub.core.api.shared.CapabilitySet
+import io.github.dexclub.core.api.shared.InputType
+import io.github.dexclub.core.api.shared.InventoryCounts
+import io.github.dexclub.core.api.shared.WorkspaceKind
+import io.github.dexclub.core.api.workspace.TargetHandle
+import io.github.dexclub.core.api.workspace.TargetSnapshotSummary
+import io.github.dexclub.core.api.workspace.WorkspaceContext
+import kotlinx.serialization.Serializable
+
+@Serializable
+internal data class OpenTargetSessionResult(
+    val sessionId: String,
+    val createdAt: String,
+    val workspace: WorkspaceContextView,
+)
+
+@Serializable
+internal data class InspectMethodResult(
+    val sessionId: String,
+    val detail: MethodDetailView,
+)
+
+@Serializable
+internal data class WorkspaceContextView(
+    val workdir: String,
+    val dexclubDir: String,
+    val workspaceId: String,
+    val activeTargetId: String,
+    val activeTarget: TargetHandleView,
+    val snapshot: TargetSnapshotSummaryView,
+)
+
+@Serializable
+internal data class TargetHandleView(
+    val targetId: String,
+    val inputType: InputType,
+    val inputPath: String,
+)
+
+@Serializable
+internal data class TargetSnapshotSummaryView(
+    val kind: WorkspaceKind,
+    val inventoryFingerprint: String,
+    val contentFingerprint: String,
+    val capabilities: CapabilitySetView,
+    val inventoryCounts: InventoryCountsView,
+)
+
+@Serializable
+internal data class CapabilitySetView(
+    val inspect: Boolean,
+    val findClass: Boolean,
+    val findMethod: Boolean,
+    val findField: Boolean,
+    val exportDex: Boolean,
+    val exportSmali: Boolean,
+    val exportJava: Boolean,
+    val manifestDecode: Boolean,
+    val resourceTableDecode: Boolean,
+    val xmlDecode: Boolean,
+    val resourceEntryList: Boolean,
+)
+
+@Serializable
+internal data class InventoryCountsView(
+    val apkCount: Int,
+    val dexCount: Int,
+    val manifestCount: Int,
+    val arscCount: Int,
+    val binaryXmlCount: Int,
+)
+
+@Serializable
+internal data class MethodDetailView(
+    val method: MethodHitView,
+    val usingFields: List<MethodFieldUsageView>? = null,
+    val callers: List<MethodHitView>? = null,
+    val invokes: List<MethodHitView>? = null,
+    val strings: List<String>? = null,
+    val annotations: List<String>? = null,
+)
+
+@Serializable
+internal data class MethodHitView(
+    val className: String,
+    val methodName: String,
+    val descriptor: String,
+    val sourcePath: String? = null,
+    val sourceEntry: String? = null,
+)
+
+@Serializable
+internal data class FieldHitView(
+    val className: String,
+    val fieldName: String,
+    val descriptor: String,
+    val sourcePath: String? = null,
+    val sourceEntry: String? = null,
+)
+
+@Serializable
+internal data class MethodFieldUsageView(
+    val usingType: FieldUsageType,
+    val field: FieldHitView,
+)
+
+internal fun parseMethodDetailSections(rawValues: List<String>?): Set<MethodDetailSection> {
+    if (rawValues.isNullOrEmpty()) return MethodDetailSection.entries.toSet()
+    return rawValues.map { raw ->
+        when (raw.trim()) {
+            "using-fields" -> MethodDetailSection.UsingFields
+            "callers" -> MethodDetailSection.Callers
+            "invokes" -> MethodDetailSection.Invokes
+            "strings" -> MethodDetailSection.Strings
+            "annotations" -> MethodDetailSection.Annotations
+            else -> throw IllegalArgumentException("Unsupported include section: $raw")
+        }
+    }.toSet()
+}
+
+internal fun TargetSession.toResult(): OpenTargetSessionResult =
+    OpenTargetSessionResult(
+        sessionId = sessionId,
+        createdAt = createdAt,
+        workspace = workspace.toView(),
+    )
+
+internal fun TargetSession.toInspectMethodResult(detail: MethodDetail): InspectMethodResult =
+    InspectMethodResult(
+        sessionId = sessionId,
+        detail = detail.toView(),
+    )
+
+internal fun WorkspaceContext.toView(): WorkspaceContextView =
+    WorkspaceContextView(
+        workdir = workdir,
+        dexclubDir = dexclubDir,
+        workspaceId = workspaceId,
+        activeTargetId = activeTargetId,
+        activeTarget = activeTarget.toView(),
+        snapshot = snapshot.toView(),
+    )
+
+internal fun TargetHandle.toView(): TargetHandleView =
+    TargetHandleView(
+        targetId = targetId,
+        inputType = inputType,
+        inputPath = inputPath,
+    )
+
+internal fun TargetSnapshotSummary.toView(): TargetSnapshotSummaryView =
+    TargetSnapshotSummaryView(
+        kind = kind,
+        inventoryFingerprint = inventoryFingerprint,
+        contentFingerprint = contentFingerprint,
+        capabilities = capabilities.toView(),
+        inventoryCounts = inventoryCounts.toView(),
+    )
+
+internal fun CapabilitySet.toView(): CapabilitySetView =
+    CapabilitySetView(
+        inspect = inspect,
+        findClass = findClass,
+        findMethod = findMethod,
+        findField = findField,
+        exportDex = exportDex,
+        exportSmali = exportSmali,
+        exportJava = exportJava,
+        manifestDecode = manifestDecode,
+        resourceTableDecode = resourceTableDecode,
+        xmlDecode = xmlDecode,
+        resourceEntryList = resourceEntryList,
+    )
+
+internal fun InventoryCounts.toView(): InventoryCountsView =
+    InventoryCountsView(
+        apkCount = apkCount,
+        dexCount = dexCount,
+        manifestCount = manifestCount,
+        arscCount = arscCount,
+        binaryXmlCount = binaryXmlCount,
+    )
+
+internal fun MethodDetail.toView(): MethodDetailView =
+    MethodDetailView(
+        method = method.toView(),
+        usingFields = usingFields?.map(MethodFieldUsage::toView),
+        callers = callers?.map(MethodHit::toView),
+        invokes = invokes?.map(MethodHit::toView),
+        strings = strings,
+        annotations = annotations,
+    )
+
+internal fun MethodHit.toView(): MethodHitView =
+    MethodHitView(
+        className = className,
+        methodName = methodName,
+        descriptor = descriptor,
+        sourcePath = sourcePath,
+        sourceEntry = sourceEntry,
+    )
+
+internal fun FieldHit.toView(): FieldHitView =
+    FieldHitView(
+        className = className,
+        fieldName = fieldName,
+        descriptor = descriptor,
+        sourcePath = sourcePath,
+        sourceEntry = sourceEntry,
+    )
+
+internal fun MethodFieldUsage.toView(): MethodFieldUsageView =
+    MethodFieldUsageView(
+        usingType = usingType,
+        field = field.toView(),
+    )

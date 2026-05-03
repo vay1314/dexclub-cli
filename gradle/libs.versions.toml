@@ -8,6 +8,7 @@ jadx = "1.5.5"
 arsclib = "1.3.8"
 logback = "1.5.32"
 shadow = "9.4.1"
+mcp = "0.12.0"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines" }
@@ -19,6 +20,7 @@ jadx-dex-input = { module = "io.github.skylot:jadx-dex-input", version.ref = "ja
 jadx-kotlin-metadata = { module = "io.github.skylot:jadx-kotlin-metadata", version.ref = "jadx" }
 arsclib = { module = "io.github.reandroid:ARSCLib", version.ref = "arsclib" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+mcp-kotlin-sdk-server = { module = "io.modelcontextprotocol:kotlin-sdk-server", version.ref = "mcp" }
 
 [plugins]
 android-multiplatform-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }

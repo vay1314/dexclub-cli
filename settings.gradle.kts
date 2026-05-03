@@ -20,6 +20,7 @@ rootProject.name = "dexclub-cli"
 include(":cli")
 include(":core")
 include(":dexkit")
+include(":mcp")
 
 includeBuild("dexkit/vendor/DexKit") {
     name = "DexKit"
