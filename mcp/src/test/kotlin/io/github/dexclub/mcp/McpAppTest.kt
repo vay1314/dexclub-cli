@@ -407,6 +407,7 @@ class McpAppTest {
                     ),
                 ),
             ),
+            handleProvider = { "method-handle-1" },
             fields = setOf("descriptor"),
             brief = true,
         )
@@ -441,6 +442,90 @@ class McpAppTest {
         }
 
         assertEquals("At least one non-blank string filter is required", error.message)
+    }
+
+    @Test
+    fun findMethodsResultCanProjectMethodHandle() {
+        val session = McpSessionStore().openTargetSession(fakeWorkspaceContext())
+        val result = session.toFindMethodsResult(
+            result = WindowedItems(
+                total = 1,
+                offset = 0,
+                limit = 1,
+                hasMore = false,
+                items = listOf(
+                    MethodHit(
+                        className = "fixture.samples.SampleSearchTarget",
+                        methodName = "exposeNeedle",
+                        descriptor = "Lfixture/samples/SampleSearchTarget;->exposeNeedle()Ljava/lang/String;",
+                    ),
+                ),
+            ),
+            handleProvider = { "method-handle-1" },
+            fields = setOf("methodHandle"),
+        )
+
+        assertEquals("method-handle-1", result.items.single()["methodHandle"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun findClassesUsingStringsResultCanProjectClassHandle() {
+        val session = McpSessionStore().openTargetSession(fakeWorkspaceContext())
+        val result = session.toFindClassesUsingStringsResult(
+            result = WindowedItems(
+                total = 1,
+                offset = 0,
+                limit = 1,
+                hasMore = false,
+                items = listOf(
+                    ClassHit(
+                        className = "Lfixture/samples/SampleSearchTarget;",
+                    ),
+                ),
+            ),
+            handleProvider = { "class-handle-1" },
+            fields = setOf("classHandle"),
+        )
+
+        assertEquals("class-handle-1", result.items.single()["classHandle"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun sessionStoreCanReuseMethodHandleAcrossInspectAndExport() {
+        val store = McpSessionStore()
+        val session = store.openTargetSession(fakeWorkspaceContext())
+
+        val handle = store.putMethodHandle(
+            sessionId = session.sessionId,
+            descriptor = "Lsample/Test;->foo()V",
+            sourcePath = "sample.apk",
+            sourceEntry = "classes.dex",
+        )
+
+        val resolved = store.getMethodHandle(session.sessionId, handle)
+
+        assertEquals("Lsample/Test;->foo()V", resolved?.descriptor)
+        assertEquals("sample.apk", resolved?.sourcePath)
+        assertEquals("classes.dex", resolved?.sourceEntry)
+    }
+
+    @Test
+    fun sessionStoreCanReuseClassHandleAcrossExport() {
+        val store = McpSessionStore()
+        val session = store.openTargetSession(fakeWorkspaceContext())
+
+        val handle = store.putClassHandle(
+            sessionId = session.sessionId,
+            descriptor = "Lsample/Test;",
+            sourcePath = "sample.apk",
+            sourceEntry = "classes.dex",
+        )
+
+        val resolved = store.getClassHandle(session.sessionId, handle)
+
+        assertEquals("Lsample/Test;", resolved?.descriptor)
+        assertEquals("sample.apk", resolved?.sourcePath)
+        assertEquals("classes.dex", resolved?.sourceEntry)
     }
 
     @Test

@@ -92,6 +92,7 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("method_handle", buildJsonObject { put("type", "string") })
                     put("descriptor", buildJsonObject { put("type", "string") })
                     put(
                         "include",
@@ -102,16 +103,18 @@ internal class McpApp(
                     )
                     put("brief", buildJsonObject { put("type", "boolean") })
                 },
-                required = listOf("session_id", "descriptor"),
+                required = listOf("session_id"),
             ),
         ) { request ->
             val session = resolveRequiredSession(request) ?: return@addTool missingSessionResult(request)
-            val descriptor = request.requiredStringArgument("descriptor")
+            val methodRef = try {
+                resolveMethodReference(request, session)
+            } catch (cause: IllegalArgumentException) {
+                return@addTool errorResult(cause.message.orEmpty())
+            }
+            val descriptor = methodRef?.descriptor.orEmpty()
             if (descriptor.isEmpty()) {
-                return@addTool CallToolResult(
-                    content = listOf(TextContent("""{"error":"descriptor is required"}""")),
-                    isError = true,
-                )
+                return@addTool errorResult("method_handle or descriptor is required")
             }
 
             val includes = try {
@@ -130,7 +133,7 @@ internal class McpApp(
 
             val detail = inspectMethod(
                 session = session,
-                descriptor = descriptor,
+                descriptor = methodRef!!.descriptor,
                 includes = includes,
             )
             CallToolResult(
@@ -196,11 +199,12 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("method_handle", buildJsonObject { put("type", "string") })
                     put("descriptor", buildJsonObject { put("type", "string") })
                     put("source_path", buildJsonObject { put("type", "string") })
                     put("source_entry", buildJsonObject { put("type", "string") })
                 },
-                required = listOf("session_id", "descriptor"),
+                required = listOf("session_id"),
             ),
         ) { request ->
             exportMethodTextTool(
@@ -216,12 +220,13 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("method_handle", buildJsonObject { put("type", "string") })
                     put("descriptor", buildJsonObject { put("type", "string") })
                     put("source_path", buildJsonObject { put("type", "string") })
                     put("source_entry", buildJsonObject { put("type", "string") })
                     put("mode", buildJsonObject { put("type", "string") })
                 },
-                required = listOf("session_id", "descriptor"),
+                required = listOf("session_id"),
             ),
         ) { request ->
             exportMethodTextTool(
@@ -237,11 +242,12 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("class_handle", buildJsonObject { put("type", "string") })
                     put("descriptor", buildJsonObject { put("type", "string") })
                     put("source_path", buildJsonObject { put("type", "string") })
                     put("source_entry", buildJsonObject { put("type", "string") })
                 },
-                required = listOf("session_id", "descriptor"),
+                required = listOf("session_id"),
             ),
         ) { request ->
             exportClassTextTool(
@@ -257,11 +263,12 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("class_handle", buildJsonObject { put("type", "string") })
                     put("descriptor", buildJsonObject { put("type", "string") })
                     put("source_path", buildJsonObject { put("type", "string") })
                     put("source_entry", buildJsonObject { put("type", "string") })
                 },
-                required = listOf("session_id", "descriptor"),
+                required = listOf("session_id"),
             ),
         ) { request ->
             exportClassTextTool(
@@ -304,7 +311,7 @@ internal class McpApp(
             val fields = try {
                 parseRequestedFields(
                     request.stringArrayArgument("fields"),
-                    supported = methodFieldNames,
+                    supported = methodFieldNamesWithHandle,
                 )
             } catch (cause: IllegalArgumentException) {
                 return@addTool errorResult(cause.message.orEmpty())
@@ -326,7 +333,14 @@ internal class McpApp(
                     TextContent(
                         json.encodeToString(
                             FindMethodsResult.serializer(),
-                            session.toFindMethodsResult(hits, fields = fields, brief = brief),
+                            session.toFindMethodsResult(
+                                hits,
+                                handleProvider = { hit ->
+                                    sessionStore.putMethodHandle(session.sessionId, hit.descriptor, hit.sourcePath, hit.sourceEntry)
+                                },
+                                fields = fields,
+                                brief = brief,
+                            ),
                         ),
                     ),
                 ),
@@ -588,14 +602,16 @@ internal class McpApp(
         exporter: (TargetSession, String, SourceLocator, String?) -> String,
     ): CallToolResult {
         val session = resolveRequiredSession(request) ?: return missingSessionResult(request)
-        val descriptor = request.requiredStringArgument("descriptor")
-        if (descriptor.isEmpty()) {
-            return CallToolResult(
-                content = listOf(TextContent("""{"error":"descriptor is required"}""")),
-                isError = true,
-            )
+        val methodRef = try {
+            resolveMethodReference(request, session)
+        } catch (cause: IllegalArgumentException) {
+            return errorResult(cause.message.orEmpty())
         }
-        val locator = request.toSourceLocator()
+        val descriptor = methodRef?.descriptor.orEmpty()
+        if (descriptor.isEmpty()) {
+            return errorResult("method_handle or descriptor is required")
+        }
+        val locator = request.toSourceLocator(methodRef)
         val mode = request.arguments?.get("mode")?.jsonPrimitive?.content?.trim()
 
         return try {
@@ -624,14 +640,16 @@ internal class McpApp(
         exporter: (TargetSession, String, SourceLocator) -> String,
     ): CallToolResult {
         val session = resolveRequiredSession(request) ?: return missingSessionResult(request)
-        val descriptor = request.requiredStringArgument("descriptor")
-        if (descriptor.isEmpty()) {
-            return CallToolResult(
-                content = listOf(TextContent("""{"error":"descriptor is required"}""")),
-                isError = true,
-            )
+        val classRef = try {
+            resolveClassReference(request, session)
+        } catch (cause: IllegalArgumentException) {
+            return errorResult(cause.message.orEmpty())
         }
-        val locator = request.toSourceLocator()
+        val descriptor = classRef?.descriptor.orEmpty()
+        if (descriptor.isEmpty()) {
+            return errorResult("class_handle or descriptor is required")
+        }
+        val locator = request.toSourceLocator(classRef)
 
         return try {
             val text = exporter(session, descriptor, locator)
@@ -657,9 +675,16 @@ internal class McpApp(
         findStringAnchoredItems(
             request = request,
             finder = ::findClassesUsingStrings,
-            supportedFields = classFieldNames,
+            supportedFields = classFieldNamesWithHandle,
             renderer = { session, items, fields, brief ->
-                FindClassesUsingStringsResult.serializer() to session.toFindClassesUsingStringsResult(items, fields = fields, brief = brief)
+                FindClassesUsingStringsResult.serializer() to session.toFindClassesUsingStringsResult(
+                    items,
+                    handleProvider = { hit ->
+                        sessionStore.putClassHandle(session.sessionId, hit.className, hit.sourcePath, hit.sourceEntry)
+                    },
+                    fields = fields,
+                    brief = brief,
+                )
             },
         )
 
@@ -667,9 +692,16 @@ internal class McpApp(
         findStringAnchoredItems(
             request = request,
             finder = ::findMethodsUsingStrings,
-            supportedFields = methodFieldNames,
+            supportedFields = methodFieldNamesWithHandle,
             renderer = { session, items, fields, brief ->
-                FindMethodsUsingStringsResult.serializer() to session.toFindMethodsUsingStringsResult(items, fields = fields, brief = brief)
+                FindMethodsUsingStringsResult.serializer() to session.toFindMethodsUsingStringsResult(
+                    items,
+                    handleProvider = { hit ->
+                        sessionStore.putMethodHandle(session.sessionId, hit.descriptor, hit.sourcePath, hit.sourceEntry)
+                    },
+                    fields = fields,
+                    brief = brief,
+                )
             },
         )
 
@@ -732,10 +764,10 @@ internal class McpApp(
             isError = true,
         )
 
-    private fun CallToolRequest.toSourceLocator(): SourceLocator =
+    private fun CallToolRequest.toSourceLocator(ref: SourceBackedHandleRef? = null): SourceLocator =
         SourceLocator(
-            sourcePath = arguments?.get("source_path")?.jsonPrimitive?.content?.trim()?.ifEmpty { null },
-            sourceEntry = arguments?.get("source_entry")?.jsonPrimitive?.content?.trim()?.ifEmpty { null },
+            sourcePath = arguments?.get("source_path")?.jsonPrimitive?.content?.trim()?.ifEmpty { null } ?: ref?.sourcePath,
+            sourceEntry = arguments?.get("source_entry")?.jsonPrimitive?.content?.trim()?.ifEmpty { null } ?: ref?.sourceEntry,
         )
 
     private fun CallToolRequest.requiredStringArgument(name: String): String =
@@ -755,6 +787,36 @@ internal class McpApp(
 
     private fun CallToolRequest.booleanArgument(name: String): Boolean? =
         arguments?.get(name)?.jsonPrimitive?.content?.toBooleanStrictOrNull()
+
+    private fun resolveMethodReference(request: CallToolRequest, session: TargetSession): MethodHandleRef? {
+        val handle = request.optionalStringArgument("method_handle")
+        if (handle != null) {
+            return sessionStore.getMethodHandle(session.sessionId, handle)
+                ?: throw IllegalArgumentException("method_handle not found")
+        }
+        val descriptor = request.optionalStringArgument("descriptor") ?: return null
+        return MethodHandleRef(
+            sessionId = session.sessionId,
+            descriptor = descriptor,
+            sourcePath = request.optionalStringArgument("source_path"),
+            sourceEntry = request.optionalStringArgument("source_entry"),
+        )
+    }
+
+    private fun resolveClassReference(request: CallToolRequest, session: TargetSession): ClassHandleRef? {
+        val handle = request.optionalStringArgument("class_handle")
+        if (handle != null) {
+            return sessionStore.getClassHandle(session.sessionId, handle)
+                ?: throw IllegalArgumentException("class_handle not found")
+        }
+        val descriptor = request.optionalStringArgument("descriptor") ?: return null
+        return ClassHandleRef(
+            sessionId = session.sessionId,
+            descriptor = descriptor,
+            sourcePath = request.optionalStringArgument("source_path"),
+            sourceEntry = request.optionalStringArgument("source_entry"),
+        )
+    }
 
     internal fun openTargetSession(input: String): TargetSession {
         val workspace = services.workspace.initialize(input)

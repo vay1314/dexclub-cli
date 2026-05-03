@@ -256,6 +256,25 @@ detail 型 tool 建议直接返回单对象，不套 `items`。
 
 是否默认返回 handle，可由 `fields` 或 tool 默认策略决定。
 
+P0 当前已落地的最小口径是：
+
+- `find_methods`
+- `find_methods_using_strings`
+- `find_classes_using_strings`
+
+这三类列表结果可返回：
+
+- `methodHandle`
+- `classHandle`
+
+并且以下 tool 已接受 handle 输入：
+
+- `inspect_method`
+- `export_method_java`
+- `export_method_smali`
+- `export_class_java`
+- `export_class_smali`
+
 ## Handle 与 Session 约定
 
 ### `open_target_session`

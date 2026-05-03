@@ -142,7 +142,9 @@ internal typealias WindowedResourceEntries = WindowedItems<ResourceEntry>
 internal typealias WindowedResourceValueHits = WindowedItems<ResourceEntryValueHit>
 
 internal val methodFieldNames = setOf("className", "methodName", "descriptor", "sourcePath", "sourceEntry")
+internal val methodFieldNamesWithHandle = methodFieldNames + "methodHandle"
 internal val classFieldNames = setOf("className", "sourcePath", "sourceEntry")
+internal val classFieldNamesWithHandle = classFieldNames + "classHandle"
 internal val resourceEntryFieldNames = setOf("resourceId", "type", "name", "filePath", "sourcePath", "sourceEntry", "resolution")
 internal val resourceValueFieldNames = setOf("resourceId", "type", "name", "value", "sourcePath", "sourceEntry")
 
@@ -460,6 +462,7 @@ internal fun TargetSession.toManifestDecodeResult(result: ManifestInspectionResu
 
 internal fun TargetSession.toFindClassesUsingStringsResult(
     result: WindowedClassHits,
+    handleProvider: (ClassHit) -> String,
     fields: Set<String>? = null,
     brief: Boolean = false,
 ): FindClassesUsingStringsResult =
@@ -469,7 +472,7 @@ internal fun TargetSession.toFindClassesUsingStringsResult(
         offset = result.offset,
         limit = result.limit,
         hasMore = result.hasMore,
-        items = result.items.map { it.toProjectedJson(effectiveClassFields(fields, brief)) },
+        items = result.items.map { it.toProjectedJson(effectiveClassFields(fields, brief), handleProvider) },
     )
 
 internal fun TargetSession.toExportTextResult(
@@ -485,6 +488,7 @@ internal fun TargetSession.toExportTextResult(
 
 internal fun TargetSession.toFindMethodsUsingStringsResult(
     result: WindowedMethodHits,
+    handleProvider: (MethodHit) -> String,
     fields: Set<String>? = null,
     brief: Boolean = false,
 ): FindMethodsUsingStringsResult =
@@ -494,11 +498,12 @@ internal fun TargetSession.toFindMethodsUsingStringsResult(
         offset = result.offset,
         limit = result.limit,
         hasMore = result.hasMore,
-        items = result.items.map { it.toProjectedJson(effectiveMethodFields(fields, brief)) },
+        items = result.items.map { it.toProjectedJson(effectiveMethodFields(fields, brief), handleProvider) },
     )
 
 internal fun TargetSession.toFindMethodsResult(
     result: WindowedMethodHits,
+    handleProvider: (MethodHit) -> String,
     fields: Set<String>? = null,
     brief: Boolean = false,
 ): FindMethodsResult =
@@ -508,7 +513,7 @@ internal fun TargetSession.toFindMethodsResult(
         offset = result.offset,
         limit = result.limit,
         hasMore = result.hasMore,
-        items = result.items.map { it.toProjectedJson(effectiveMethodFields(fields, brief)) },
+        items = result.items.map { it.toProjectedJson(effectiveMethodFields(fields, brief), handleProvider) },
     )
 
 internal fun TargetSession.toResolveResourceResult(result: io.github.dexclub.core.api.resource.ResourceValue): ResolveResourceResult =
@@ -864,10 +869,10 @@ internal fun parseRequestedFields(rawValues: List<String>?, supported: Set<Strin
 }
 
 private fun effectiveMethodFields(fields: Set<String>?, brief: Boolean): Set<String> =
-    fields ?: if (brief) setOf("descriptor", "sourcePath", "sourceEntry") else methodFieldNames
+    fields ?: if (brief) setOf("descriptor", "sourcePath", "sourceEntry", "methodHandle") else methodFieldNamesWithHandle
 
 private fun effectiveClassFields(fields: Set<String>?, brief: Boolean): Set<String> =
-    fields ?: if (brief) setOf("className") else classFieldNames
+    fields ?: if (brief) setOf("className", "classHandle") else classFieldNamesWithHandle
 
 private fun effectiveResourceEntryFields(fields: Set<String>?, brief: Boolean): Set<String> =
     fields ?: if (brief) setOf("resourceId", "type", "name") else resourceEntryFieldNames
@@ -875,20 +880,22 @@ private fun effectiveResourceEntryFields(fields: Set<String>?, brief: Boolean): 
 private fun effectiveResourceValueFields(fields: Set<String>?, brief: Boolean): Set<String> =
     fields ?: if (brief) setOf("resourceId", "type", "name", "value") else resourceValueFieldNames
 
-private fun MethodHit.toProjectedJson(fields: Set<String>): JsonObject =
+private fun MethodHit.toProjectedJson(fields: Set<String>, handleProvider: (MethodHit) -> String): JsonObject =
     buildJsonObject {
         if ("className" in fields) put("className", className)
         if ("methodName" in fields) put("methodName", methodName)
         if ("descriptor" in fields) put("descriptor", descriptor)
         if ("sourcePath" in fields && sourcePath != null) put("sourcePath", sourcePath)
         if ("sourceEntry" in fields && sourceEntry != null) put("sourceEntry", sourceEntry)
+        if ("methodHandle" in fields) put("methodHandle", handleProvider(this@toProjectedJson))
     }
 
-private fun ClassHit.toProjectedJson(fields: Set<String>): JsonObject =
+private fun ClassHit.toProjectedJson(fields: Set<String>, handleProvider: (ClassHit) -> String): JsonObject =
     buildJsonObject {
         if ("className" in fields) put("className", className)
         if ("sourcePath" in fields && sourcePath != null) put("sourcePath", sourcePath)
         if ("sourceEntry" in fields && sourceEntry != null) put("sourceEntry", sourceEntry)
+        if ("classHandle" in fields) put("classHandle", handleProvider(this@toProjectedJson))
     }
 
 private fun ResourceEntry.toProjectedJson(fields: Set<String>): JsonObject =

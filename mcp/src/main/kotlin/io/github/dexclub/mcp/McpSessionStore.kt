@@ -11,10 +11,31 @@ internal data class TargetSession(
     val createdAt: String,
 )
 
+internal interface SourceBackedHandleRef {
+    val sourcePath: String?
+    val sourceEntry: String?
+}
+
+internal data class MethodHandleRef(
+    val sessionId: String,
+    val descriptor: String,
+    override val sourcePath: String? = null,
+    override val sourceEntry: String? = null,
+) : SourceBackedHandleRef
+
+internal data class ClassHandleRef(
+    val sessionId: String,
+    val descriptor: String,
+    override val sourcePath: String? = null,
+    override val sourceEntry: String? = null,
+) : SourceBackedHandleRef
+
 internal class McpSessionStore(
     private val nowProvider: () -> Instant = { Instant.now() },
 ) {
     private val targetSessions = ConcurrentHashMap<String, TargetSession>()
+    private val methodHandles = ConcurrentHashMap<String, MethodHandleRef>()
+    private val classHandles = ConcurrentHashMap<String, ClassHandleRef>()
 
     fun openTargetSession(workspace: WorkspaceContext): TargetSession {
         val session = TargetSession(
@@ -27,4 +48,32 @@ internal class McpSessionStore(
     }
 
     fun getTargetSession(sessionId: String): TargetSession? = targetSessions[sessionId]
+
+    fun putMethodHandle(sessionId: String, descriptor: String, sourcePath: String?, sourceEntry: String?): String {
+        val handle = UUID.randomUUID().toString()
+        methodHandles[handle] = MethodHandleRef(
+            sessionId = sessionId,
+            descriptor = descriptor,
+            sourcePath = sourcePath,
+            sourceEntry = sourceEntry,
+        )
+        return handle
+    }
+
+    fun getMethodHandle(sessionId: String, handle: String): MethodHandleRef? =
+        methodHandles[handle]?.takeIf { it.sessionId == sessionId }
+
+    fun putClassHandle(sessionId: String, descriptor: String, sourcePath: String?, sourceEntry: String?): String {
+        val handle = UUID.randomUUID().toString()
+        classHandles[handle] = ClassHandleRef(
+            sessionId = sessionId,
+            descriptor = descriptor,
+            sourcePath = sourcePath,
+            sourceEntry = sourceEntry,
+        )
+        return handle
+    }
+
+    fun getClassHandle(sessionId: String, handle: String): ClassHandleRef? =
+        classHandles[handle]?.takeIf { it.sessionId == sessionId }
 }
