@@ -25,6 +25,7 @@ fun main() {
 
     val config = loadHttpServerConfig()
     val app = McpApp()
+    val server = app.createServer()
 
     System.err.println(
         "DexClub MCP listening on http://${config.host}:${config.port}${config.path} " +
@@ -43,7 +44,6 @@ fun main() {
                 val transport = StreamableHttpServerTransport(
                     StreamableHttpServerTransport.Configuration(enableJsonResponse = true),
                 ).also { it.setSessionIdGenerator(null) }
-                val server = app.createServer()
                 server.createSession(transport)
                 transport.handlePostRequest(session = null, call = CompatibleAcceptingCall(call))
             }

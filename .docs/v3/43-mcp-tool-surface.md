@@ -530,7 +530,7 @@ P0 不建议一开始就暴露复杂 DexKit 风格查询对象。
 
 每个 item 推荐至少可包含：
 
-- `descriptor`
+- `className`
 - `sourcePath`
 - `sourceEntry`
 - `classHandle`
