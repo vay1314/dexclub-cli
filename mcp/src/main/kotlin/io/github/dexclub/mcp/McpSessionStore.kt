@@ -49,6 +49,15 @@ internal class McpSessionStore(
 
     fun getTargetSession(sessionId: String): TargetSession? = targetSessions[sessionId]
 
+    fun listTargetSessions(): List<TargetSession> =
+        targetSessions.values
+            .sortedByDescending { it.createdAt }
+
+    fun closeTargetSession(sessionId: String): TargetSession? {
+        clearSessionHandles(sessionId)
+        return targetSessions.remove(sessionId)
+    }
+
     fun putMethodHandle(sessionId: String, descriptor: String, sourcePath: String?, sourceEntry: String?): String {
         val handle = UUID.randomUUID().toString()
         methodHandles[handle] = MethodHandleRef(
@@ -76,4 +85,9 @@ internal class McpSessionStore(
 
     fun getClassHandle(sessionId: String, handle: String): ClassHandleRef? =
         classHandles[handle]?.takeIf { it.sessionId == sessionId }
+
+    private fun clearSessionHandles(sessionId: String) {
+        methodHandles.entries.removeIf { it.value.sessionId == sessionId }
+        classHandles.entries.removeIf { it.value.sessionId == sessionId }
+    }
 }

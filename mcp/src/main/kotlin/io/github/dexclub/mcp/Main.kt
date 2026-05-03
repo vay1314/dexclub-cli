@@ -1,21 +1,77 @@
 package io.github.dexclub.mcp
 
-import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.runBlocking
+import io.ktor.http.Headers
+import io.ktor.http.HttpHeaders
+import io.ktor.serialization.kotlinx.json.json
+import io.ktor.server.application.Application
+import io.ktor.server.application.ApplicationCall
+import io.ktor.server.application.ApplicationCallPipeline
+import io.ktor.server.application.install
+import io.ktor.server.engine.embeddedServer
+import io.ktor.server.netty.Netty
+import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.request.ApplicationRequest
+import io.ktor.server.request.httpMethod
+import io.ktor.server.request.uri
+import io.ktor.server.routing.post
+import io.ktor.server.routing.routing
+import io.modelcontextprotocol.kotlin.sdk.server.StreamableHttpServerTransport
+import io.modelcontextprotocol.kotlin.sdk.types.McpJson
 
-fun main(): Unit = runBlocking {
-    // MCP stdio 握手不能被任何 stdout 噪音污染。
+fun main() {
     configureSlf4jSimpleDefaults()
     disableKotlinLoggingStartupMessage()
     DexKitMcpBootstrap.configureNativeLibraryDir()
+
+    val config = loadHttpServerConfig()
     val app = McpApp()
-    try {
-        val server = app.createServer()
-        server.createSession(app.createTransport())
-        awaitCancellation()
-    } finally {
-        app.close()
-    }
+
+    System.err.println(
+        "DexClub MCP listening on http://${config.host}:${config.port}${config.path} " +
+            "(stateless streamable HTTP, debugHttp=${config.debugHttp})",
+    )
+
+    embeddedServer(Netty, host = config.host, port = config.port) {
+        if (config.debugHttp) {
+            installHttpDebugLogging()
+        }
+        install(ContentNegotiation) {
+            json(McpJson)
+        }
+        routing {
+            post(config.path) {
+                val transport = StreamableHttpServerTransport(
+                    StreamableHttpServerTransport.Configuration(enableJsonResponse = true),
+                ).also { it.setSessionIdGenerator(null) }
+                val server = app.createServer()
+                server.createSession(transport)
+                transport.handlePostRequest(session = null, call = CompatibleAcceptingCall(call))
+            }
+        }
+    }.start(wait = true)
+}
+
+private data class HttpServerConfig(
+    val host: String,
+    val port: Int,
+    val path: String,
+    val debugHttp: Boolean,
+)
+
+private fun loadHttpServerConfig(): HttpServerConfig =
+    HttpServerConfig(
+        host = System.getenv("DEXCLUB_MCP_HOST")?.trim()?.ifEmpty { null } ?: "127.0.0.1",
+        port = System.getenv("DEXCLUB_MCP_PORT")?.trim()?.toIntOrNull() ?: 8787,
+        path = normalizePath(System.getenv("DEXCLUB_MCP_PATH")),
+        debugHttp = System.getenv("DEXCLUB_MCP_HTTP_DEBUG")
+            ?.trim()
+            ?.equals("true", ignoreCase = true)
+            ?: false,
+    )
+
+private fun normalizePath(rawPath: String?): String {
+    val path = rawPath?.trim()?.ifEmpty { null } ?: "/mcp"
+    return if (path.startsWith('/')) path else "/$path"
 }
 
 private fun configureSlf4jSimpleDefaults() {
@@ -30,3 +86,99 @@ private fun disableKotlinLoggingStartupMessage() {
             .invoke(instance, false)
     }
 }
+
+private fun Application.installHttpDebugLogging() {
+    intercept(ApplicationCallPipeline.Monitoring) {
+        val request = context.request
+        val startedAt = System.nanoTime()
+        System.err.println(
+            "HTTP MCP request: method=${request.httpMethod.value} uri=${request.uri} " +
+                "accept=${request.headers[HttpHeaders.Accept] ?: ""} contentType=${request.headers[HttpHeaders.ContentType] ?: ""} " +
+                "protocol=${request.headers["Mcp-Protocol-Version"] ?: ""} session=${request.headers["Mcp-Session-Id"] ?: ""}",
+        )
+        proceed()
+        val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
+        System.err.println(
+            "HTTP MCP response: method=${request.httpMethod.value} uri=${request.uri} " +
+                "status=${context.response.status()?.value ?: 200} elapsedMs=$elapsedMs",
+        )
+    }
+}
+
+private class CompatibleAcceptingCall(
+    private val delegate: ApplicationCall,
+) : ApplicationCall by delegate {
+    override val request: ApplicationRequest = CompatibleAcceptingRequest(delegate.request, this)
+}
+
+private class CompatibleAcceptingRequest(
+    private val delegate: ApplicationRequest,
+    private val callDelegate: ApplicationCall,
+) : ApplicationRequest by delegate {
+    override val headers: Headers = CompatibleAcceptingHeaders(delegate.headers)
+    override val call: ApplicationCall
+        get() = callDelegate
+}
+
+private class CompatibleAcceptingHeaders(
+    private val delegate: Headers,
+) : Headers {
+    override val caseInsensitiveName: Boolean
+        get() = delegate.caseInsensitiveName
+
+    override fun get(name: String): String? =
+        if (name.equals(HttpHeaders.Accept, ignoreCase = true)) {
+            compatibleAccept(delegate[HttpHeaders.Accept])
+        } else {
+            delegate[name]
+        }
+
+    override fun getAll(name: String): List<String>? =
+        if (name.equals(HttpHeaders.Accept, ignoreCase = true)) {
+            listOf(compatibleAccept(delegate[HttpHeaders.Accept]))
+        } else {
+            delegate.getAll(name)
+        }
+
+    override fun names(): Set<String> = delegate.names()
+
+    override fun entries(): Set<Map.Entry<String, List<String>>> =
+        delegate.entries().mapTo(linkedSetOf()) { entry ->
+            if (entry.key.equals(HttpHeaders.Accept, ignoreCase = true)) {
+                object : Map.Entry<String, List<String>> {
+                    override val key: String = entry.key
+                    override val value: List<String> = listOf(compatibleAccept(entry.value.firstOrNull()))
+                }
+            } else {
+                entry
+            }
+        }
+
+    override fun isEmpty(): Boolean = delegate.isEmpty()
+
+    override fun contains(name: String): Boolean =
+        name.equals(HttpHeaders.Accept, ignoreCase = true) || delegate.contains(name)
+
+    override fun contains(name: String, value: String): Boolean =
+        getAll(name)?.any { it.equals(value, ignoreCase = true) } == true
+
+    override fun forEach(body: (String, List<String>) -> Unit) {
+        entries().forEach { body(it.key, it.value) }
+    }
+}
+
+private fun compatibleAccept(original: String?): String =
+    buildString {
+        val base = original?.trim().orEmpty()
+        if (base.isNotEmpty()) {
+            append(base)
+        }
+        if (!base.contains("application/json", ignoreCase = true)) {
+            if (isNotEmpty()) append(", ")
+            append("application/json")
+        }
+        if (!base.contains("text/event-stream", ignoreCase = true)) {
+            if (isNotEmpty()) append(", ")
+            append("text/event-stream")
+        }
+    }

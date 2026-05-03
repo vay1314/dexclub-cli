@@ -17,16 +17,12 @@ import io.github.dexclub.core.api.workspace.WorkspaceContext
 import io.github.dexclub.core.api.workspace.WorkspaceRef
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
-import io.modelcontextprotocol.kotlin.sdk.server.StdioServerTransport
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
-import kotlinx.io.asSink
-import kotlinx.io.asSource
-import kotlinx.io.buffered
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -43,6 +39,13 @@ internal class McpApp(
     private val services: Services = createDefaultServices(),
     private val sessionStore: McpSessionStore = McpSessionStore(),
 ) {
+    private val sessionIdOnlySchema = ToolSchema(
+        properties = buildJsonObject {
+            put("session_id", buildJsonObject { put("type", "string") })
+        },
+        required = listOf("session_id"),
+    )
+
     private val json = Json {
         prettyPrint = false
         encodeDefaults = true
@@ -89,8 +92,79 @@ internal class McpApp(
         }
 
         server.addTool(
+            name = "list_target_sessions",
+            description = "列出当前 MCP 进程中已打开的 target session，用于在同一 server 内切换不同工作区或目标。",
+            inputSchema = ToolSchema(
+                properties = buildJsonObject {},
+            ),
+        ) {
+            val sessions = listTargetSessions()
+            CallToolResult(
+                content = listOf(
+                    TextContent(
+                        json.encodeToString(
+                            ListTargetSessionsResult.serializer(),
+                            ListTargetSessionsResult(
+                                total = sessions.size,
+                                items = sessions.map { it.toView() },
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        }
+
+        server.addTool(
+            name = "get_target_session",
+            description = "读取单个 target session 的当前绑定工作区与 active target 信息。",
+            inputSchema = sessionIdOnlySchema,
+        ) { request ->
+            val sessionId = request.requiredStringArgument("session_id")
+            if (sessionId.isEmpty()) {
+                return@addTool errorResult("session_id is required")
+            }
+            val session = getTargetSession(sessionId)
+                ?: return@addTool errorResult("session_id not found")
+            CallToolResult(
+                content = listOf(
+                    TextContent(
+                        json.encodeToString(
+                            TargetSessionView.serializer(),
+                            session.toView(),
+                        ),
+                    ),
+                ),
+            )
+        }
+
+        server.addTool(
+            name = "close_target_session",
+            description = "关闭一个 target session，并清理该 session 下的 method_handle / class_handle。",
+            inputSchema = sessionIdOnlySchema,
+        ) { request ->
+            val sessionId = request.requiredStringArgument("session_id")
+            if (sessionId.isEmpty()) {
+                return@addTool errorResult("session_id is required")
+            }
+            val session = closeTargetSession(sessionId)
+            CallToolResult(
+                content = listOf(
+                    TextContent(
+                        json.encodeToString(
+                            CloseTargetSessionResult.serializer(),
+                            CloseTargetSessionResult(
+                                closed = session != null,
+                                session = session?.toView(),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        }
+
+        server.addTool(
             name = "inspect_method",
-            description = "基于已打开的 target session 检查方法的一层事实视图。",
+            description = "基于已打开的 target session 检查方法的一层事实视图。优先传 method_handle；include 仅支持 using-fields、callers、invokes、strings、annotations；brief=true 时只返回计数摘要。",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
@@ -153,7 +227,7 @@ internal class McpApp(
 
         server.addTool(
             name = "manifest",
-            description = "返回当前 target 的结构化 manifest 视图，可按需附带原始 XML。",
+            description = "返回当前 target 的结构化 manifest 视图。默认先只取结构化字段；仅在确实需要原始证据时才传 include_text=true。",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
@@ -198,7 +272,7 @@ internal class McpApp(
 
         server.addTool(
             name = "export_method_java",
-            description = "导出单方法的 Java 语义视图。",
+            description = "导出单方法的 Java 语义视图。优先传 method_handle；通常应先用 find/inspect 缩小候选，再导出少量方法文本。",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
@@ -219,7 +293,7 @@ internal class McpApp(
 
         server.addTool(
             name = "export_method_smali",
-            description = "导出单方法的 smali 原始证据视图。",
+            description = "导出单方法的 smali 原始证据视图。优先传 method_handle；通常应先用 find/inspect 缩小候选，再导出少量方法文本。",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
@@ -241,7 +315,7 @@ internal class McpApp(
 
         server.addTool(
             name = "export_class_java",
-            description = "导出整类的 Java 语义视图。",
+            description = "导出整类的 Java 语义视图。优先传 class_handle；通常应先确认类候选，再导出整类文本。",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
@@ -262,7 +336,7 @@ internal class McpApp(
 
         server.addTool(
             name = "export_class_smali",
-            description = "导出整类的 smali 原始证据视图。",
+            description = "导出整类的 smali 原始证据视图。优先传 class_handle；通常应先确认类候选，再导出整类文本。",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
@@ -283,7 +357,7 @@ internal class McpApp(
 
         server.addTool(
             name = "find_methods",
-            description = "按类名、方法名或 descriptor 片段定位方法候选。",
+            description = "按类名、方法名或 descriptor 片段定位方法候选。建议配合 brief=true 和 fields 收窄返回，再继续 inspect 或 export。",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
@@ -354,7 +428,7 @@ internal class McpApp(
 
         server.addTool(
             name = "find_classes_using_strings",
-            description = "使用字符串锚点定位类候选。",
+            description = "使用字符串锚点定位类候选。建议优先用 brief=true 和 fields 收窄候选，再继续 export_class_* 或 find_methods。",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
@@ -391,7 +465,7 @@ internal class McpApp(
 
         server.addTool(
             name = "find_methods_using_strings",
-            description = "使用字符串锚点定位方法候选。",
+            description = "使用字符串锚点定位方法候选。建议优先用 brief=true 和 fields 收窄候选，再继续 inspect_method 或 export_method_*。",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
@@ -428,7 +502,7 @@ internal class McpApp(
 
         server.addTool(
             name = "list_res",
-            description = "列出当前 target 可见的资源条目索引。",
+            description = "列出当前 target 可见的资源条目索引。建议优先用 brief=true 和 fields 收窄结果。",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
@@ -484,7 +558,7 @@ internal class McpApp(
 
         server.addTool(
             name = "find_resource_values",
-            description = "按资源值搜索资源候选，仅支持 string/integer/bool/color。",
+            description = "按资源值搜索资源候选，仅支持 string/integer/bool/color。建议优先用 brief=true 和 fields 收窄结果，再用 get_resource_value 精确确认。",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
@@ -591,12 +665,6 @@ internal class McpApp(
 
         return server
     }
-
-    fun createTransport(): StdioServerTransport =
-        StdioServerTransport(
-            inputStream = System.`in`.asSource().buffered(),
-            outputStream = System.out.asSink().buffered(),
-        )
 
     fun close() {
         (services.dex as? AutoCloseable)?.close()
@@ -802,7 +870,9 @@ internal class McpApp(
         if (handle != null) {
             requireNotNull(session) { "method_handle requires session_id" }
             return sessionStore.getMethodHandle(session.sessionId, handle)
-                ?: throw IllegalArgumentException("method_handle not found")
+                ?: throw IllegalArgumentException(
+                    "method_handle not found. Handles must come from a previous dexclub result in the same session; do not construct placeholder handles manually",
+                )
         }
         val descriptor = request.optionalStringArgument("descriptor") ?: return null
         return MethodHandleRef(
@@ -818,7 +888,9 @@ internal class McpApp(
         if (handle != null) {
             requireNotNull(session) { "class_handle requires session_id" }
             return sessionStore.getClassHandle(session.sessionId, handle)
-                ?: throw IllegalArgumentException("class_handle not found")
+                ?: throw IllegalArgumentException(
+                    "class_handle not found. Handles must come from a previous dexclub result in the same session; do not construct placeholder handles manually",
+                )
         }
         val descriptor = request.optionalStringArgument("descriptor") ?: return null
         return ClassHandleRef(
@@ -833,6 +905,8 @@ internal class McpApp(
         val workspace = services.workspace.initialize(input)
         return sessionStore.openTargetSession(workspace)
     }
+
+    internal fun listTargetSessions(): List<TargetSession> = sessionStore.listTargetSessions()
 
     internal fun inspectMethod(
         workspace: WorkspaceContext,
@@ -859,6 +933,8 @@ internal class McpApp(
     )
 
     internal fun getTargetSession(sessionId: String): TargetSession? = sessionStore.getTargetSession(sessionId)
+
+    internal fun closeTargetSession(sessionId: String): TargetSession? = sessionStore.closeTargetSession(sessionId)
 
     internal fun getResourceValue(
         workspace: WorkspaceContext,

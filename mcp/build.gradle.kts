@@ -14,8 +14,12 @@ application {
 
 dependencies {
     implementation(project(":core"))
+    implementation(platform(libs.ktor.bom))
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.mcp.kotlin.sdk.server)
+    implementation(libs.ktor.server.netty)
+    implementation(libs.ktor.server.content.negotiation)
+    implementation(libs.ktor.serialization.kotlinx.json)
     runtimeOnly(libs.slf4j.simple)
 
     testImplementation(kotlin("test"))

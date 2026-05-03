@@ -53,6 +53,25 @@ internal data class OpenTargetSessionResult(
 )
 
 @Serializable
+internal data class TargetSessionView(
+    val sessionId: String,
+    val createdAt: String,
+    val workspace: WorkspaceContextView,
+)
+
+@Serializable
+internal data class ListTargetSessionsResult(
+    val total: Int,
+    val items: List<TargetSessionView>,
+)
+
+@Serializable
+internal data class CloseTargetSessionResult(
+    val closed: Boolean,
+    val session: TargetSessionView? = null,
+)
+
+@Serializable
 internal data class InspectMethodResult(
     val sessionId: String? = null,
     val detail: MethodDetailView,
@@ -421,7 +440,9 @@ internal fun parseMethodDetailSections(rawValues: List<String>?): Set<MethodDeta
             "invokes" -> MethodDetailSection.Invokes
             "strings" -> MethodDetailSection.Strings
             "annotations" -> MethodDetailSection.Annotations
-            else -> throw IllegalArgumentException("Unsupported include section: $raw")
+            else -> throw IllegalArgumentException(
+                "Unsupported include section: $raw. Supported sections: using-fields, callers, invokes, strings, annotations",
+            )
         }
     }.toSet()
 }
@@ -448,6 +469,13 @@ internal fun parseManifestInspectionSections(rawValues: List<String>?): Set<Mani
 
 internal fun TargetSession.toResult(): OpenTargetSessionResult =
     OpenTargetSessionResult(
+        sessionId = sessionId,
+        createdAt = createdAt,
+        workspace = workspace.toView(),
+    )
+
+internal fun TargetSession.toView(): TargetSessionView =
+    TargetSessionView(
         sessionId = sessionId,
         createdAt = createdAt,
         workspace = workspace.toView(),

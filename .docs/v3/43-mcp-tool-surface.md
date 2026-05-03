@@ -71,6 +71,40 @@ tool 不应混淆以下输出层级：
 
 skill 再基于这些对象形成结论。
 
+### 5. transport 优先选择 `Streamable HTTP`
+
+当前 `dexclub` 的 MCP server 应优先以：
+
+- `Streamable HTTP`
+
+方式暴露，而不是依赖本地 `stdio` 进程握手。
+
+原因是：
+
+- Codex 侧已支持通过 `url` 注册 MCP server
+- `Streamable HTTP` 更贴近官方推荐路径
+- 可以规避不同 `stdio` framing 实现之间的兼容性问题
+
+当前推荐的运行方式是：
+
+- 先单独启动 `mcp` 进程
+- 再在 Codex 配置中通过 `url` 连接
+
+当前实现进一步收敛为：
+
+- 优先使用 `stateless Streamable HTTP`
+- 主要走 `POST /mcp`
+- 由 DexClub 自己的 `open_target_session` 管理业务会话
+
+这样可以避免将 transport 层 session 与 DexClub 自身 session 语义混在一起。
+
+而不是通过：
+
+- `command`
+- `args`
+
+直接拉起本地 `stdio` 进程
+
 ## P0 Tool 分组
 
 P0 建议至少提供以下 4 组 tool。
@@ -78,6 +112,9 @@ P0 建议至少提供以下 4 组 tool。
 ### A. 会话
 
 - `open_target_session`
+- `list_target_sessions`
+- `get_target_session`
+- `close_target_session`
 
 ### B. 定位
 
@@ -131,7 +168,13 @@ P0 当前已落地的最小口径是：
 - 多数 P0 tool 已支持 `workdir` fallback
 - `method_handle / class_handle`
   - 仅在 `session` 路径下有效
-  - `workdir` fallback 不返回、也不接受 handle
+- `workdir` fallback 不返回、也不接受 handle
+- 一个常驻 MCP server 可同时持有多个不同工作区/目标的 target session
+- 切换工作区的推荐方式是：
+  - 再次调用 `open_target_session`
+  - 取得新的 `session_id`
+  - 必要时通过 `list_target_sessions / get_target_session / close_target_session`
+    管理这些并存 session
 
 ### 2. 对象定位优先级
 
@@ -191,7 +234,29 @@ P0 当前已落地的最小口径是：
 - `brief=false`
   - 返回完整结构
 
-### 6. include 语义
+### 6. P0 默认调用策略
+
+P0 tool 的默认使用顺序应尽量收敛为：
+
+1. 先 `open_target_session`
+2. 先用 `find_*` / `list_res` 的 `brief=true` 与 `fields` 缩小候选
+3. 再用 `inspect_method` 看一层事实
+4. 最后才调用 `export_*` 获取大段文本证据
+
+这条策略的目标是：
+
+- 降低 token 成本
+- 避免在候选很多时直接批量导出文本
+- 让 skill 更稳定地围绕 handle 继续下钻
+
+额外约束：
+
+- `manifest` 默认应先只取结构化字段
+- 只有在确实需要原始证据时才传 `include_text=true`
+- `method_handle / class_handle` 必须来自同一 session 内前序 dexclub 结果
+- 不应手工构造占位 handle
+
+### 7. include 语义
 
 对存在可选 section 的 detail tool，建议统一使用：
 
@@ -301,6 +366,44 @@ P0 当前已落地的最小口径是：
 - `session`
 - `target`
 - `capabilities`
+
+### `list_target_sessions`
+
+目标：
+
+- 列出当前 MCP 进程内所有已打开的 target session
+
+建议输出：
+
+- `total`
+- `items`
+
+每个 item 至少包含：
+
+- `sessionId`
+- `createdAt`
+- `workspace`
+
+### `get_target_session`
+
+目标：
+
+- 读取单个 target session 当前绑定的工作区与 active target 信息
+
+建议输入：
+
+- `session_id`
+
+### `close_target_session`
+
+目标：
+
+- 关闭一个 target session
+- 同时清理该 session 下缓存的 `method_handle / class_handle`
+
+建议输入：
+
+- `session_id`
 
 ### `method_handle`
 

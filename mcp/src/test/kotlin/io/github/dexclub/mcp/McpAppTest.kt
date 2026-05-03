@@ -87,6 +87,55 @@ class McpAppTest {
     }
 
     @Test
+    fun listTargetSessionsReturnsNewestFirst() {
+        val timestamps = mutableListOf(
+            java.time.Instant.parse("2026-05-03T10:00:00Z"),
+            java.time.Instant.parse("2026-05-03T10:00:01Z"),
+        )
+        val workspaceService = FakeWorkspaceService(fakeWorkspaceContext())
+        val app = McpApp(
+            services = Services(
+                workspace = workspaceService,
+                dex = FakeDexAnalysisService(),
+                resource = FakeResourceService(),
+            ),
+            sessionStore = McpSessionStore(nowProvider = { timestamps.removeAt(0) }),
+        )
+
+        val first = app.openTargetSession("first.apk")
+        val second = app.openTargetSession("second.apk")
+
+        val sessions = app.listTargetSessions()
+
+        assertEquals(listOf(second.sessionId, first.sessionId), sessions.map { it.sessionId })
+    }
+
+    @Test
+    fun closeTargetSessionRemovesSessionAndClearsHandles() {
+        val store = McpSessionStore()
+        val session = store.openTargetSession(fakeWorkspaceContext())
+        val methodHandle = store.putMethodHandle(
+            sessionId = session.sessionId,
+            descriptor = "Lsample/Test;->foo()V",
+            sourcePath = "sample.apk",
+            sourceEntry = "classes.dex",
+        )
+        val classHandle = store.putClassHandle(
+            sessionId = session.sessionId,
+            descriptor = "Lsample/Test;",
+            sourcePath = "sample.apk",
+            sourceEntry = "classes.dex",
+        )
+
+        val closed = store.closeTargetSession(session.sessionId)
+
+        assertEquals(session, closed)
+        assertEquals(null, store.getTargetSession(session.sessionId))
+        assertEquals(null, store.getMethodHandle(session.sessionId, methodHandle))
+        assertEquals(null, store.getClassHandle(session.sessionId, classHandle))
+    }
+
+    @Test
     fun findMethodsSupportsWorkdirFallbackWithoutSession() {
         val workspace = fakeWorkspaceContext()
         val workspaceService = FakeWorkspaceService(workspace)
