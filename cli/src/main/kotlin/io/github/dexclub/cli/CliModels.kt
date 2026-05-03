@@ -77,7 +77,7 @@ sealed interface CliRequest {
         override val outputFormat: OutputFormat,
     ) : CliRequest
 
-    data class ResolveRes(
+    data class GetResValue(
         val workdir: String?,
         val resourceId: String? = null,
         val type: String? = null,
@@ -85,7 +85,7 @@ sealed interface CliRequest {
         override val outputFormat: OutputFormat,
     ) : CliRequest
 
-    data class FindRes(
+    data class FindResValues(
         val workdir: String?,
         val query: QueryInput,
         val window: PageWindow,

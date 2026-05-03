@@ -136,12 +136,12 @@ sealed interface QueryInput {
     data class File(val path: String) : QueryInput
 }
 
-sealed interface ResolveResTarget {
-    data class ById(val id: String) : ResolveResTarget
+sealed interface GetResValueTarget {
+    data class ById(val id: String) : GetResValueTarget
     data class ByTypeName(
         val type: String,
         val name: String,
-    ) : ResolveResTarget
+    ) : GetResValueTarget
 }
 
 sealed interface CliRequest {
@@ -166,9 +166,9 @@ sealed interface CliRequest {
         val mode: MethodSmaliMode,
     ) : CliRequest
 
-    data class ResolveRes(
+    data class GetResValue(
         val workdir: String?,
-        val target: ResolveResTarget,
+        val target: GetResValueTarget,
         val json: Boolean,
     ) : CliRequest
 }
@@ -347,8 +347,8 @@ interface XmlExecutor {
 }
 
 interface ResourceValueExecutor {
-    fun resolveResourceValue(workspace: WorkspaceContext, request: ResolveResourceRequest): ResourceValue
-    fun findResourceEntries(workspace: WorkspaceContext, request: FindResourcesRequest): List<ResourceEntryValueHit>
+    fun getResourceValue(workspace: WorkspaceContext, request: ResolveResourceRequest): ResourceValue
+    fun findResourceValues(workspace: WorkspaceContext, request: FindResourcesRequest): List<ResourceEntryValueHit>
 }
 ```
 
@@ -369,7 +369,7 @@ interface DexAnalysisService {
 }
 
 interface ResourceService {
-    fun resolveResourceValue(workspace: WorkspaceContext, request: ResolveResourceRequest): ResourceValue
+    fun getResourceValue(workspace: WorkspaceContext, request: ResolveResourceRequest): ResourceValue
 }
 ```
 

@@ -366,7 +366,7 @@ internal class McpApp(
         }
 
         server.addTool(
-            name = "find_res",
+            name = "find_resource_values",
             description = "按资源值搜索资源候选，仅支持 string/integer/bool/color。",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
@@ -392,7 +392,7 @@ internal class McpApp(
             val offset = request.intArgument("offset")
             val limit = request.intArgument("limit")
             val hits = try {
-                findResources(
+                findResourceValues(
                     session = session,
                     type = type,
                     value = value,
@@ -417,7 +417,7 @@ internal class McpApp(
         }
 
         server.addTool(
-            name = "resolve_res",
+            name = "get_resource_value",
             description = "将资源 id 或 type/name 解析为结构化资源值。",
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
@@ -436,7 +436,7 @@ internal class McpApp(
             if (resourceId == null && (type == null || name == null)) {
                 return@addTool errorResult("resource_id or type+name is required")
             }
-            val resource = resolveResource(
+            val resource = getResourceValue(
                 session = session,
                 resourceId = resourceId,
                 type = type,
@@ -660,12 +660,12 @@ internal class McpApp(
 
     internal fun getTargetSession(sessionId: String): TargetSession? = sessionStore.getTargetSession(sessionId)
 
-    internal fun resolveResource(
+    internal fun getResourceValue(
         session: TargetSession,
         resourceId: String? = null,
         type: String? = null,
         name: String? = null,
-    ) = services.resource.resolveResourceValue(
+    ) = services.resource.getResourceValue(
         workspace = session.workspace,
         request = ResolveResourceRequest(
             resourceId = resourceId,
@@ -746,7 +746,7 @@ internal class McpApp(
         return applyWindow(filtered, offset, limit)
     }
 
-    internal fun findResources(
+    internal fun findResourceValues(
         session: TargetSession,
         type: String,
         value: String,
@@ -757,7 +757,7 @@ internal class McpApp(
     ): WindowedResourceValueHits {
         require(type.isNotBlank()) { "type must not be blank" }
         require(value.isNotBlank()) { "value must not be blank" }
-        val hits = services.resource.findResourceEntries(
+        val hits = services.resource.findResourceValues(
             workspace = session.workspace,
             request = buildFindResourcesRequest(
                 type = type.trim(),

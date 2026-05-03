@@ -86,26 +86,26 @@ internal class DefaultResourceService(
         )
     }
 
-    override fun resolveResourceValue(
+    override fun getResourceValue(
         workspace: WorkspaceContext,
         request: ResolveResourceRequest,
     ): ResourceValue {
         capabilityChecker.require(workspace, Operation.ResourceTableDecode)
         val snapshot = requireActiveSnapshot(workspace)
-        return resourceValueExecutor.resolveResourceValue(
+        return resourceValueExecutor.getResourceValue(
             workspace = workspace,
             inventory = snapshot.inventory,
             request = request,
         )
     }
 
-    override fun findResourceEntries(
+    override fun findResourceValues(
         workspace: WorkspaceContext,
         request: FindResourcesRequest,
     ): List<ResourceEntryValueHit> {
         capabilityChecker.require(workspace, Operation.ResourceTableDecode)
         val snapshot = requireActiveSnapshot(workspace)
-        val hits = resourceValueExecutor.findResourceEntries(
+        val hits = resourceValueExecutor.findResourceValues(
             workspace = workspace,
             inventory = snapshot.inventory,
             request = request,

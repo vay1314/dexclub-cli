@@ -17,7 +17,7 @@ internal class DefaultResourceValueExecutor(
     private val queryParser: ResourceSearchQueryParser,
     private val toolVersion: String,
 ) : ResourceValueExecutor {
-    override fun resolveResourceValue(
+    override fun getResourceValue(
         workspace: WorkspaceContext,
         inventory: MaterialInventory,
         request: ResolveResourceRequest,
@@ -76,7 +76,7 @@ internal class DefaultResourceValueExecutor(
         )
     }
 
-    override fun findResourceEntries(
+    override fun findResourceValues(
         workspace: WorkspaceContext,
         inventory: MaterialInventory,
         request: FindResourcesRequest,

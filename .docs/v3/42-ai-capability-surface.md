@@ -402,8 +402,8 @@ P0 至少建议提供：
 2. `find_methods_using_strings`
 3. `find_classes_using_strings`
 4. `manifest`
-5. `find_res`
-6. `resolve_res`
+5. `find_resource_values`
+6. `get_resource_value`
 7. `list_res`
 
 理由：
@@ -504,8 +504,8 @@ AI 能力面在设计上应默认遵循：
 8. `export_method_java`
 9. `export_class_java`
 10. `manifest`
-11. `find_res`
-12. `resolve_res`
+11. `find_resource_values`
+12. `get_resource_value`
 13. `list_res`
 
 说明：
@@ -657,8 +657,8 @@ AI 能力面 P0 应直接站在当前 `core` 之上。
 - `find-class-using-strings`
 - `find-method-using-strings`
 - `manifest`
-- `find-res`
-- `resolve-res`
+- `find-res-values`
+- `get-res-value`
 - `list-res`
 - `export-method-smali`
 - `export-class-smali`
@@ -706,7 +706,7 @@ AI 能力面 P0 应直接站在当前 `core` 之上。
 8. 落 `export_method_java`
 9. 落 `export_class_java`
 10. 落 `manifest`
-11. 落 `find_res / resolve_res / list_res`
+11. 落 `find_resource_values / get_resource_value / list_res`
 12. 再回头补 `find_methods`
 
 原因：

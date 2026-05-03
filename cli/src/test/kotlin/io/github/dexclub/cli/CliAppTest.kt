@@ -488,8 +488,8 @@ class CliAppTest {
     }
 
     @Test
-    fun resolveResReadsResourceValueThroughCliPipeline() {
-        val workspaceDir = createTempDirectory("dexclub-cli-resolve-res")
+    fun getResValueReadsResourceValueThroughCliPipeline() {
+        val workspaceDir = createTempDirectory("dexclub-cli-get-res-value")
         val apkFile = workspaceDir.resolve("app.apk").toFile()
         compileResourceApk(
             outputApk = apkFile,
@@ -510,7 +510,7 @@ class CliAppTest {
 
         val output = run(
             app,
-            listOf("resolve-res", "--type", "string", "--name", "app_name", "--json"),
+            listOf("get-res-value", "--type", "string", "--name", "app_name", "--json"),
         )
         assertEquals(0, output.exitCode, output.stderr)
         val parsed = Json.parseToJsonElement(output.stdout).jsonObject
@@ -520,8 +520,8 @@ class CliAppTest {
     }
 
     @Test
-    fun resolveResReturnsCapabilityErrorOnDexWorkspace() {
-        val workspaceDir = createTempDirectory("dexclub-cli-resolve-res-unsupported")
+    fun getResValueReturnsCapabilityErrorOnDexWorkspace() {
+        val workspaceDir = createTempDirectory("dexclub-cli-get-res-value-unsupported")
         workspaceDir.resolve("classes.dex").writeText("")
         val app = CliApp(
             services = createDefaultServices(),
@@ -531,13 +531,13 @@ class CliAppTest {
         val initOut = run(app, listOf("init", workspaceDir.resolve("classes.dex").toString()))
         assertEquals(0, initOut.exitCode)
 
-        val output = run(app, listOf("resolve-res", "--type", "string", "--name", "app_name"))
+        val output = run(app, listOf("get-res-value", "--type", "string", "--name", "app_name"))
         assertEquals(2, output.exitCode)
-        assertTrue(output.stderr.contains("command 'resolve-res' is not supported"), output.stderr)
+        assertTrue(output.stderr.contains("command 'get-res-value' is not supported"), output.stderr)
     }
 
     @Test
-    fun resolveResParserRejectsMutuallyExclusiveSelectors() {
+    fun getResValueParserRejectsMutuallyExclusiveSelectors() {
         val app = CliApp(
             services = createDefaultServices(),
             cwdProvider = { createTempDirectory("dexclub-cli-resolve-usage").toString() },
@@ -545,7 +545,7 @@ class CliAppTest {
 
         val output = run(
             app,
-            listOf("resolve-res", "--id", "0x7f010001", "--type", "string", "--name", "app_name"),
+            listOf("get-res-value", "--id", "0x7f010001", "--type", "string", "--name", "app_name"),
         )
 
         assertEquals(1, output.exitCode)
@@ -554,8 +554,8 @@ class CliAppTest {
     }
 
     @Test
-    fun findResRunsThroughCliPipeline() {
-        val workspaceDir = createTempDirectory("dexclub-cli-find-res")
+    fun findResValuesRunsThroughCliPipeline() {
+        val workspaceDir = createTempDirectory("dexclub-cli-find-res-values")
         val apkFile = workspaceDir.resolve("app.apk").toFile()
         compileResourceApk(
             outputApk = apkFile,
@@ -579,7 +579,7 @@ class CliAppTest {
         val output = run(
             app,
             listOf(
-                "find-res",
+                "find-res-values",
                 "--query-json",
                 """{"type":"string","value":"login","contains":true,"ignoreCase":true}""",
                 "--offset",
@@ -599,8 +599,8 @@ class CliAppTest {
     }
 
     @Test
-    fun findResReturnsCapabilityErrorOnDexWorkspace() {
-        val workspaceDir = createTempDirectory("dexclub-cli-find-res-unsupported")
+    fun findResValuesReturnsCapabilityErrorOnDexWorkspace() {
+        val workspaceDir = createTempDirectory("dexclub-cli-find-res-values-unsupported")
         workspaceDir.resolve("classes.dex").writeText("")
         val app = CliApp(
             services = createDefaultServices(),
@@ -610,9 +610,9 @@ class CliAppTest {
         val initOut = run(app, listOf("init", workspaceDir.resolve("classes.dex").toString()))
         assertEquals(0, initOut.exitCode)
 
-        val output = run(app, listOf("find-res", "--query-json", """{"type":"string","value":"login"}"""))
+        val output = run(app, listOf("find-res-values", "--query-json", """{"type":"string","value":"login"}"""))
         assertEquals(2, output.exitCode)
-        assertTrue(output.stderr.contains("command 'find-res' is not supported"), output.stderr)
+        assertTrue(output.stderr.contains("command 'find-res-values' is not supported"), output.stderr)
     }
 
     @Test

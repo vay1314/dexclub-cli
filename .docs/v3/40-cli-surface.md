@@ -37,8 +37,8 @@ manifest
 res-table
 decode-xml
 list-res
-resolve-res
-find-res
+get-res-value
+find-res-values
 ```
 
 ## 总体语法
@@ -744,10 +744,10 @@ text 输出规则：
 - tab 分隔
 - 空结果时只保留表头
 
-### resolve-res
+### get-res-value
 
 ```text
-cli resolve-res [workdir] (--id <res-id> | --type <type> --name <name>) [--json]
+cli get-res-value [workdir] (--id <res-id> | --type <type> --name <name>) [--json]
 ```
 
 职责：
@@ -769,10 +769,10 @@ name=app_name
 value=DexClub
 ```
 
-### find-res
+### find-res-values
 
 ```text
-cli find-res [workdir] (--query-json <json> | --query-file <file>) [--offset <n>] [--limit <n>] [--json]
+cli find-res-values [workdir] (--query-json <json> | --query-file <file>) [--offset <n>] [--limit <n>] [--json]
 ```
 
 职责：
@@ -1030,13 +1030,13 @@ Run 'cli help' to see available commands.
 - `find-field`
 - `find-class-using-strings`
 - `find-method-using-strings`
-- `find-res`
+- `find-res-values`
 
 规则：
 
 - `--query-json` 与 `--query-file` 必须且只能传一个
 
-### `resolve-res`
+### `get-res-value`
 
 规则：
 
@@ -1046,7 +1046,7 @@ Run 'cli help' to see available commands.
 
 ## 依赖组规则
 
-### `resolve-res`
+### `get-res-value`
 
 规则：
 
@@ -1066,7 +1066,7 @@ Run 'cli help' to see available commands.
 适用：
 
 - 所有 `find-*`
-- `find-res`
+- `find-res-values`
 
 规则：
 
@@ -1078,7 +1078,7 @@ Run 'cli help' to see available commands.
 适用：
 
 - 所有 `find-*`
-- `find-res`
+- `find-res-values`
 
 规则：
 
@@ -1125,7 +1125,7 @@ Usage:
 Error: --id and --type/--name are mutually exclusive
 
 Usage:
-  cli resolve-res [workdir] (--id <res-id> | --type <type> --name <name>) [--json]
+  cli get-res-value [workdir] (--id <res-id> | --type <type> --name <name>) [--json]
 ```
 
 ```text

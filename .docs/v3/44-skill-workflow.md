@@ -195,8 +195,8 @@ skill 应根据当前问题、已有对象和证据强度，决定：
 - `find_methods_using_strings`
 - `find_classes_using_strings`
 - `manifest`
-- `find_res`
-- `resolve_res`
+- `find_resource_values`
+- `get_resource_value`
 - `list_res`
 
 skill 在这一阶段的目标不是拿结论，而是：

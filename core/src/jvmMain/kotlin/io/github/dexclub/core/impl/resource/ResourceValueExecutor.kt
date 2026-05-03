@@ -8,13 +8,13 @@ import io.github.dexclub.core.api.workspace.WorkspaceContext
 import io.github.dexclub.core.impl.workspace.model.MaterialInventory
 
 internal interface ResourceValueExecutor {
-    fun resolveResourceValue(
+    fun getResourceValue(
         workspace: WorkspaceContext,
         inventory: MaterialInventory,
         request: ResolveResourceRequest,
     ): ResourceValue
 
-    fun findResourceEntries(
+    fun findResourceValues(
         workspace: WorkspaceContext,
         inventory: MaterialInventory,
         request: FindResourcesRequest,

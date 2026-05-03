@@ -337,8 +337,8 @@ internal object CliHelp {
             ),
         ),
         CommandHelpSpec(
-            command = "resolve-res",
-            usage = CliUsages.resolveRes,
+            command = "get-res-value",
+            usage = CliUsages.getResValue,
             description = "Resolve a single resource entry by id or by type and name.",
             arguments = listOf("[workdir]  Optional workspace directory. Defaults to the current directory."),
             options = listOf(
@@ -354,8 +354,8 @@ internal object CliHelp {
             ),
         ),
         CommandHelpSpec(
-            command = "find-res",
-            usage = CliUsages.findRes,
+            command = "find-res-values",
+            usage = CliUsages.findResValues,
             description = "Search resource entries by direct value using a JSON query.",
             arguments = listOf("[workdir]  Optional workspace directory. Defaults to the current directory."),
             options = listOf(
@@ -420,8 +420,8 @@ internal object CliHelp {
             appendLine("  res-table                Decode resources.arsc summary.")
             appendLine("  decode-xml               Decode a resource XML by path.")
             appendLine("  list-res                 List resource entries.")
-            appendLine("  resolve-res              Resolve a resource by id or by type and name.")
-            appendLine("  find-res                 Search resources by direct value.")
+            appendLine("  get-res-value             Resolve a resource by id or by type and name.")
+            appendLine("  find-res-values           Search resources by direct value.")
             appendLine()
             appendLine("Global Rules:")
             appendLine("  init is the required first step for creating .dexclub.")

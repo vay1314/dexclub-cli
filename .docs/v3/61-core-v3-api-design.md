@@ -179,8 +179,8 @@
 - `dumpResourceTable`
 - `decodeXml`
 - `listResourceEntries`
-- `resolveResourceValue`
-- `findResourceEntries`
+- `getResourceValue`
+- `findResourceValues`
 
 ## service 形态
 

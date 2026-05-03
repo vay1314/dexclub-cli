@@ -56,10 +56,10 @@ internal class ResourceCommandAdapter(
         )
     }
 
-    fun resolveRes(request: CliRequest.ResolveRes): CommandResult {
+    fun getResValue(request: CliRequest.GetResValue): CommandResult {
         val workspaceRef = workdirResolver.resolve(request.workdir)
         val workspace = services.workspace.open(workspaceRef)
-        val result = services.resource.resolveResourceValue(
+        val result = services.resource.getResourceValue(
             workspace,
             ResolveResourceRequest(
                 resourceId = request.resourceId,
@@ -74,11 +74,11 @@ internal class ResourceCommandAdapter(
         )
     }
 
-    fun findRes(request: CliRequest.FindRes): CommandResult {
+    fun findResValues(request: CliRequest.FindResValues): CommandResult {
         val workspaceRef = workdirResolver.resolve(request.workdir)
         val workspace = services.workspace.open(workspaceRef)
-        val queryText = queryTextLoader.load(request.query, CliUsages.findRes)
-        val result = services.resource.findResourceEntries(
+        val queryText = queryTextLoader.load(request.query, CliUsages.findResValues)
+        val result = services.resource.findResourceValues(
             workspace,
             io.github.dexclub.core.api.resource.FindResourcesRequest(
                 queryText = queryText,

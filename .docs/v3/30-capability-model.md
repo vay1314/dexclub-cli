@@ -189,8 +189,8 @@ enum class Operation {
 - `res-table` -> `ResourceTableDecode`
 - `decode-xml` -> `XmlDecode`
 - `list-res` -> `ResourceEntryList`
-- `resolve-res` -> `ResourceTableDecode`
-- `find-res` -> `ResourceTableDecode`
+- `get-res-value` -> `ResourceTableDecode`
+- `find-res-values` -> `ResourceTableDecode`
 
 ## 统一 gate
 

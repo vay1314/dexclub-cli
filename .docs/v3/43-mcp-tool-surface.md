@@ -85,8 +85,8 @@ P0 建议至少提供以下 4 组 tool。
 - `find_classes_using_strings`
 - `find_methods`
 - `manifest`
-- `find_res`
-- `resolve_res`
+- `find_resource_values`
+- `get_resource_value`
 - `list_res`
 
 ### C. 检查
@@ -225,7 +225,7 @@ detail 型 tool 建议直接返回单对象，不套 `items`。
 
 - `inspect_method`
 - `manifest`
-- `resolve_res`
+- `get_resource_value`
 
 ### 3. 证据型输出
 
@@ -430,7 +430,7 @@ P0 应至少允许 skill 拿到：
   - 不应被 `include` 裁掉
 - `include_text=true` 时，允许附带原始 manifest XML 作为取证兜底
 
-### `find_res`
+### `find_resource_values`
 
 目标：
 
@@ -451,14 +451,14 @@ P0 应至少允许 skill 拿到：
 补充约定：
 
 - 当前能力面应直接对齐现有 `core` 真实能力
-- `find_res` 的主语是资源值命中，不是资源名命中
+- `find_resource_values` 的主语是资源值命中，不是资源名命中
 - 当前建议至少支持：
   - `type=string`
   - `type=integer`
   - `type=bool`
   - `type=color`
 
-### `resolve_res`
+### `get_resource_value`
 
 目标：
 

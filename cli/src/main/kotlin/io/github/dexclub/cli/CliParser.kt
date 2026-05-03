@@ -26,8 +26,8 @@ internal class CliParser {
             "res-table" -> parseWorkdirCommand(command, argv.drop(1))
             "decode-xml" -> parseDecodeXml(argv.drop(1))
             "list-res" -> parseWorkdirCommand(command, argv.drop(1))
-            "resolve-res" -> parseResolveRes(argv.drop(1))
-            "find-res" -> parseFindRes(argv.drop(1))
+            "get-res-value" -> parseGetResValue(argv.drop(1))
+            "find-res-values" -> parseFindResValues(argv.drop(1))
             "find-class" -> parseFindClass(argv.drop(1))
             "find-method" -> parseFindMethod(argv.drop(1))
             "inspect-method" -> parseInspectMethod(argv.drop(1))
@@ -214,11 +214,11 @@ internal class CliParser {
         )
     }
 
-    private fun parseResolveRes(tokens: List<String>): CliRequest {
+    private fun parseGetResValue(tokens: List<String>): CliRequest {
         if (tokens.size == 1 && CliHelp.isHelpFlag(tokens.single())) {
-            return CliRequest.Help("resolve-res")
+            return CliRequest.Help("get-res-value")
         }
-        val usage = CliUsages.resolveRes
+        val usage = CliUsages.getResValue
         val positionals = mutableListOf<String>()
         var outputFormat = OutputFormat.Text
         var resourceId: String? = null
@@ -302,7 +302,7 @@ internal class CliParser {
             )
         }
 
-        return CliRequest.ResolveRes(
+        return CliRequest.GetResValue(
             workdir = positionals.singleOrNull(),
             resourceId = resourceId,
             type = type,
@@ -311,12 +311,12 @@ internal class CliParser {
         )
     }
 
-    private fun parseFindRes(tokens: List<String>): CliRequest {
+    private fun parseFindResValues(tokens: List<String>): CliRequest {
         if (tokens.size == 1 && CliHelp.isHelpFlag(tokens.single())) {
-            return CliRequest.Help("find-res")
+            return CliRequest.Help("find-res-values")
         }
-        val parsed = parseQueryCommand(tokens, CliUsages.findRes)
-        return CliRequest.FindRes(
+        val parsed = parseQueryCommand(tokens, CliUsages.findResValues)
+        return CliRequest.FindResValues(
             workdir = parsed.workdir,
             query = parsed.query,
             window = parsed.window,
@@ -1427,10 +1427,10 @@ internal object CliUsages {
     const val resTable: String = "cli res-table [workdir] [--json]"
     const val decodeXml: String = "cli decode-xml [workdir] --path <xml-path> [--json]"
     const val listRes: String = "cli list-res [workdir] [--json]"
-    const val resolveRes: String =
-        "cli resolve-res [workdir] (--id <res-id> | --type <type> --name <name>) [--json]"
-    const val findRes: String =
-        "cli find-res [workdir] (--query-json <json> | --query-file <file>) [--offset <n>] [--limit <n>] [--json]"
+    const val getResValue: String =
+        "cli get-res-value [workdir] (--id <res-id> | --type <type> --name <name>) [--json]"
+    const val findResValues: String =
+        "cli find-res-values [workdir] (--query-json <json> | --query-file <file>) [--offset <n>] [--limit <n>] [--json]"
     const val findClass: String =
         "cli find-class [workdir] (--query-json <json> | --query-file <file>) [--offset <n>] [--limit <n>] [--json]"
     const val findMethod: String =
@@ -1468,8 +1468,8 @@ internal object CliUsages {
             "res-table" -> resTable
             "decode-xml" -> decodeXml
             "list-res" -> listRes
-            "resolve-res" -> resolveRes
-            "find-res" -> findRes
+            "get-res-value" -> getResValue
+            "find-res-values" -> findResValues
             "find-class" -> findClass
             "find-method" -> findMethod
             "inspect-method" -> inspectMethod

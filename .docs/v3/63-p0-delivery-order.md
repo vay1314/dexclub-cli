@@ -137,8 +137,8 @@
 2. `res-table`
 3. `decode-xml`
 4. `list-res`
-5. `resolve-res`
-6. `find-res`
+5. `get-res-value`
+6. `find-res-values`
 
 ## 暂不进入 P0 的内容
 
@@ -168,7 +168,7 @@
 禁止优先做：
 
 - `export-class-java`
-- `find-res`
+- `find-res-values`
 - 高级资源值语义
 
 而跳过：

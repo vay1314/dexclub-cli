@@ -16,9 +16,9 @@ interface ResourceService {
 
     fun listResourceEntries(workspace: WorkspaceContext): List<ResourceEntry>
 
-    fun resolveResourceValue(workspace: WorkspaceContext, request: ResolveResourceRequest): ResourceValue
+    fun getResourceValue(workspace: WorkspaceContext, request: ResolveResourceRequest): ResourceValue
 
-    fun findResourceEntries(
+    fun findResourceValues(
         workspace: WorkspaceContext,
         request: FindResourcesRequest,
     ): List<ResourceEntryValueHit>

@@ -495,7 +495,7 @@ class McpAppTest {
         )
         val session = app.openTargetSession("sample.apk")
 
-        val resource = app.resolveResource(
+        val resource = app.getResourceValue(
             session = session,
             resourceId = "0x7f010001",
         )
@@ -521,7 +521,7 @@ class McpAppTest {
         )
         val session = app.openTargetSession("sample.apk")
 
-        val resource = app.resolveResource(
+        val resource = app.getResourceValue(
             session = session,
             type = "string",
             name = "fixture_name",
@@ -624,7 +624,7 @@ class McpAppTest {
         )
         val session = app.openTargetSession("sample.apk")
 
-        val result = app.findResources(
+        val result = app.findResourceValues(
             session = session,
             type = "string",
             value = "Needle",
@@ -878,7 +878,7 @@ private class FakeResourceService : ResourceService {
             lastWorkspace = workspace
         }
 
-    override fun resolveResourceValue(workspace: WorkspaceContext, request: ResolveResourceRequest): ResourceValue =
+    override fun getResourceValue(workspace: WorkspaceContext, request: ResolveResourceRequest): ResourceValue =
         ResourceValue(
             resourceId = request.resourceId ?: "0x7f010001",
             type = request.type ?: "string",
@@ -889,7 +889,7 @@ private class FakeResourceService : ResourceService {
             lastResolveResourceRequest = request
         }
 
-    override fun findResourceEntries(
+    override fun findResourceValues(
         workspace: WorkspaceContext,
         request: FindResourcesRequest,
     ): List<ResourceEntryValueHit> =

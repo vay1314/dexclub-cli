@@ -232,7 +232,7 @@ java -jar cli/build/libs/dexclub-cli-all.jar export-method-smali /path/to/workdi
 java -jar cli/build/libs/dexclub-cli-all.jar manifest /path/to/workdir
 java -jar cli/build/libs/dexclub-cli-all.jar res-table /path/to/workdir --json
 java -jar cli/build/libs/dexclub-cli-all.jar decode-xml /path/to/workdir --path res/layout/activity_main.xml
-java -jar cli/build/libs/dexclub-cli-all.jar resolve-res /path/to/workdir --id 0x7f0a0001
+java -jar cli/build/libs/dexclub-cli-all.jar get-res-value /path/to/workdir --id 0x7f0a0001
 ```
 
 ## CI
