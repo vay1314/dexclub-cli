@@ -22,6 +22,7 @@ import io.github.dexclub.dexkit.query.BatchFindMethodUsingStrings
 import io.github.dexclub.dexkit.query.StringMatchType
 import io.github.dexclub.dexkit.query.StringMatcher
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 @Serializable
 internal data class OpenTargetSessionResult(
@@ -41,6 +42,14 @@ internal data class FindClassesUsingStringsResult(
     val sessionId: String,
     val total: Int,
     val items: List<ClassHitView>,
+)
+
+@Serializable
+internal data class ExportTextResult(
+    val sessionId: String,
+    val descriptor: String,
+    val view: String,
+    val text: String,
 )
 
 @Serializable
@@ -185,6 +194,17 @@ internal fun TargetSession.toFindClassesUsingStringsResult(result: WindowedClass
         items = result.items.map(ClassHit::toView),
     )
 
+internal fun TargetSession.toExportTextResult(
+    descriptor: String,
+    view: String,
+    text: String,
+): ExportTextResult = ExportTextResult(
+    sessionId = sessionId,
+    descriptor = descriptor,
+    view = view,
+    text = text,
+)
+
 internal fun TargetSession.toFindMethodsUsingStringsResult(result: WindowedMethodHits): FindMethodsUsingStringsResult =
     FindMethodsUsingStringsResult(
         sessionId = sessionId,
@@ -286,101 +306,89 @@ internal fun MethodFieldUsage.toView(): MethodFieldUsageView =
 internal fun buildFindMethodsUsingStringsRequest(
     strings: List<String>,
     requireAll: Boolean,
-): FindMethodsUsingStringsRequest {
-    val query = BatchFindMethodUsingStrings().apply {
-        val normalized = strings.filter { it.isNotBlank() }
-        if (requireAll) {
-            if (normalized.isNotEmpty()) {
-                groups["all"] = normalized.map { value ->
-                    StringMatcher(value = value, matchType = StringMatchType.Contains)
-                }
-            }
-        } else {
-            normalized.forEachIndexed { index, value ->
-                groups["any-$index"] = listOf(
-                    StringMatcher(value = value, matchType = StringMatchType.Contains),
-                )
-            }
-        }
-    }
-
-    if (query.groups.isEmpty()) {
-        throw IllegalArgumentException("At least one non-blank string filter is required")
-    }
-
-    return FindMethodsUsingStringsRequest(
-        queryText = kotlinx.serialization.json.Json.encodeToString(
+): FindMethodsUsingStringsRequest =
+    FindMethodsUsingStringsRequest(
+        queryText = Json.encodeToString(
             BatchFindMethodUsingStrings.serializer(),
-            query,
+            buildStringMatcherQuery(BatchFindMethodUsingStrings(), strings, requireAll),
         ),
         window = PageWindow(),
     )
-}
 
 internal fun buildFindClassesUsingStringsRequest(
     strings: List<String>,
     requireAll: Boolean,
-): FindClassesUsingStringsRequest {
-    val query = BatchFindClassUsingStrings().apply {
-        val normalized = strings.filter { it.isNotBlank() }
-        if (requireAll) {
-            if (normalized.isNotEmpty()) {
-                groups["all"] = normalized.map { value ->
-                    StringMatcher(value = value, matchType = StringMatchType.Contains)
-                }
-            }
-        } else {
-            normalized.forEachIndexed { index, value ->
-                groups["any-$index"] = listOf(
-                    StringMatcher(value = value, matchType = StringMatchType.Contains),
-                )
-            }
-        }
-    }
-
-    if (query.groups.isEmpty()) {
-        throw IllegalArgumentException("At least one non-blank string filter is required")
-    }
-
-    return FindClassesUsingStringsRequest(
-        queryText = kotlinx.serialization.json.Json.encodeToString(
+): FindClassesUsingStringsRequest =
+    FindClassesUsingStringsRequest(
+        queryText = Json.encodeToString(
             BatchFindClassUsingStrings.serializer(),
-            query,
+            buildStringMatcherQuery(BatchFindClassUsingStrings(), strings, requireAll),
         ),
         window = PageWindow(),
     )
+
+private fun buildStringMatcherQuery(
+    query: BatchFindMethodUsingStrings,
+    strings: List<String>,
+    requireAll: Boolean,
+): BatchFindMethodUsingStrings = query.apply {
+    populateStringMatcherGroups(groups, strings, requireAll)
 }
 
-internal fun applyWindow(items: List<ClassHit>, offset: Int? = null, limit: Int? = null): WindowedClassHits {
+private fun buildStringMatcherQuery(
+    query: BatchFindClassUsingStrings,
+    strings: List<String>,
+    requireAll: Boolean,
+): BatchFindClassUsingStrings = query.apply {
+    populateStringMatcherGroups(groups, strings, requireAll)
+}
+
+private fun populateStringMatcherGroups(
+    groups: MutableMap<String, List<StringMatcher>>,
+    strings: List<String>,
+    requireAll: Boolean,
+) {
+    val normalized = strings.filter { it.isNotBlank() }
+    if (requireAll) {
+        if (normalized.isNotEmpty()) {
+            groups["all"] = normalized.map(::containsMatcher)
+        }
+    } else {
+        normalized.forEachIndexed { index, value ->
+            groups["any-$index"] = listOf(containsMatcher(value))
+        }
+    }
+
+    if (groups.isEmpty()) {
+        throw IllegalArgumentException("At least one non-blank string filter is required")
+    }
+}
+
+private fun containsMatcher(value: String): StringMatcher =
+    StringMatcher(value = value, matchType = StringMatchType.Contains)
+
+internal fun applyWindow(items: List<ClassHit>, offset: Int? = null, limit: Int? = null): WindowedClassHits =
+    applyWindowSlice(items, offset, limit) { total, slice ->
+        WindowedClassHits(total = total, items = slice)
+    }
+
+internal fun applyWindow(items: List<MethodHit>, offset: Int? = null, limit: Int? = null): WindowedMethodHits =
+    applyWindowSlice(items, offset, limit) { total, slice ->
+        WindowedMethodHits(total = total, items = slice)
+    }
+
+private fun <T, R> applyWindowSlice(
+    items: List<T>,
+    offset: Int?,
+    limit: Int?,
+    builder: (Int, List<T>) -> R,
+): R {
     val normalizedOffset = offset ?: 0
     require(normalizedOffset >= 0) { "offset must be non-negative" }
     require(limit == null || limit > 0) { "limit must be positive when specified" }
     if (normalizedOffset >= items.size) {
-        return WindowedClassHits(
-            total = items.size,
-            items = emptyList(),
-        )
+        return builder(items.size, emptyList())
     }
     val toIndex = if (limit == null) items.size else minOf(items.size, normalizedOffset + limit)
-    return WindowedClassHits(
-        total = items.size,
-        items = items.subList(normalizedOffset, toIndex),
-    )
-}
-
-internal fun applyWindow(items: List<MethodHit>, offset: Int? = null, limit: Int? = null): WindowedMethodHits {
-    val normalizedOffset = offset ?: 0
-    require(normalizedOffset >= 0) { "offset must be non-negative" }
-    require(limit == null || limit > 0) { "limit must be positive when specified" }
-    if (normalizedOffset >= items.size) {
-        return WindowedMethodHits(
-            total = items.size,
-            items = emptyList(),
-        )
-    }
-    val toIndex = if (limit == null) items.size else minOf(items.size, normalizedOffset + limit)
-    return WindowedMethodHits(
-        total = items.size,
-        items = items.subList(normalizedOffset, toIndex),
-    )
+    return builder(items.size, items.subList(normalizedOffset, toIndex))
 }

@@ -23,6 +23,8 @@ import io.github.dexclub.core.api.shared.CacheState
 import io.github.dexclub.core.api.shared.CapabilitySet
 import io.github.dexclub.core.api.shared.InputType
 import io.github.dexclub.core.api.shared.InventoryCounts
+import io.github.dexclub.core.api.shared.MethodSmaliMode
+import io.github.dexclub.core.api.shared.SourceLocator
 import io.github.dexclub.core.api.shared.Services
 import io.github.dexclub.core.api.shared.WorkspaceIssue
 import io.github.dexclub.core.api.shared.WorkspaceKind
@@ -285,6 +287,121 @@ class McpAppTest {
         assertEquals("At least one non-blank string filter is required", error.message)
     }
 
+    @Test
+    fun exportMethodJavaTextUsesSessionWorkspaceAndReturnsFileContent() {
+        val workspace = fakeWorkspaceContext()
+        val dexService = FakeDexAnalysisService()
+        val app = McpApp(
+            services = Services(
+                workspace = FakeWorkspaceService(workspace),
+                dex = dexService,
+                resource = FakeResourceService(),
+            ),
+            sessionStore = McpSessionStore(),
+        )
+        val session = app.openTargetSession("sample.apk")
+
+        val text = app.exportMethodJavaText(
+            session = session,
+            descriptor = "Lsample/Test;->foo()V",
+            source = SourceLocator(sourcePath = "sample.apk", sourceEntry = "classes.dex"),
+        )
+
+        assertEquals(workspace, dexService.lastWorkspace)
+        assertEquals("Lsample/Test;->foo()V", dexService.lastExportMethodJavaRequest?.methodSignature)
+        assertEquals(SourceLocator(sourcePath = "sample.apk", sourceEntry = "classes.dex"), dexService.lastExportMethodJavaRequest?.source)
+        assertTrue(
+            dexService.lastExportMethodJavaRequest!!.outputPath.replace('\\', '/')
+                .contains("/.dexclub/targets/${workspace.activeTargetId}/cache/exports/tmp/"),
+        )
+        assertEquals("method-java:Lsample/Test;->foo()V", text)
+    }
+
+    @Test
+    fun exportMethodSmaliTextSupportsClassMode() {
+        val workspace = fakeWorkspaceContext()
+        val dexService = FakeDexAnalysisService()
+        val app = McpApp(
+            services = Services(
+                workspace = FakeWorkspaceService(workspace),
+                dex = dexService,
+                resource = FakeResourceService(),
+            ),
+            sessionStore = McpSessionStore(),
+        )
+        val session = app.openTargetSession("sample.apk")
+
+        val text = app.exportMethodSmaliText(
+            session = session,
+            descriptor = "Lsample/Test;->foo()V",
+            source = SourceLocator(sourcePath = "sample.apk", sourceEntry = "classes.dex"),
+            mode = "class",
+        )
+
+        assertEquals(MethodSmaliMode.Class, dexService.lastExportMethodSmaliRequest?.mode)
+        assertTrue(
+            dexService.lastExportMethodSmaliRequest!!.outputPath.replace('\\', '/')
+                .contains("/.dexclub/targets/${workspace.activeTargetId}/cache/exports/tmp/"),
+        )
+        assertEquals("method-smali:Lsample/Test;->foo()V:class", text)
+    }
+
+    @Test
+    fun exportClassJavaTextUsesSessionWorkspaceAndReturnsFileContent() {
+        val workspace = fakeWorkspaceContext()
+        val dexService = FakeDexAnalysisService()
+        val app = McpApp(
+            services = Services(
+                workspace = FakeWorkspaceService(workspace),
+                dex = dexService,
+                resource = FakeResourceService(),
+            ),
+            sessionStore = McpSessionStore(),
+        )
+        val session = app.openTargetSession("sample.apk")
+
+        val text = app.exportClassJavaText(
+            session = session,
+            descriptor = "Lsample/Test;",
+            source = SourceLocator(sourcePath = "sample.apk", sourceEntry = "classes.dex"),
+        )
+
+        assertEquals("Lsample/Test;", dexService.lastExportClassJavaRequest?.className)
+        assertTrue(
+            dexService.lastExportClassJavaRequest!!.outputPath.replace('\\', '/')
+                .contains("/.dexclub/targets/${workspace.activeTargetId}/cache/exports/tmp/"),
+        )
+        assertEquals("class-java:Lsample/Test;", text)
+    }
+
+    @Test
+    fun exportClassSmaliTextUsesSessionWorkspaceAndReturnsFileContent() {
+        val workspace = fakeWorkspaceContext()
+        val dexService = FakeDexAnalysisService()
+        val app = McpApp(
+            services = Services(
+                workspace = FakeWorkspaceService(workspace),
+                dex = dexService,
+                resource = FakeResourceService(),
+            ),
+            sessionStore = McpSessionStore(),
+        )
+        val session = app.openTargetSession("sample.apk")
+
+        val text = app.exportClassSmaliText(
+            session = session,
+            descriptor = "Lsample/Test;",
+            source = SourceLocator(sourcePath = "sample.apk", sourceEntry = "classes.dex"),
+        )
+
+        assertEquals("Lsample/Test;", dexService.lastExportClassSmaliRequest?.className)
+        assertTrue(
+            dexService.lastExportClassSmaliRequest!!.outputPath.replace('\\', '/')
+                .contains("/.dexclub/targets/${workspace.activeTargetId}/cache/exports/tmp/"),
+        )
+        assertEquals("class-smali:Lsample/Test;", text)
+    }
+
     private fun fakeWorkspaceContext(): WorkspaceContext =
         WorkspaceContext(
             workdir = "D:/tmp/workspace",
@@ -375,6 +492,10 @@ private class FakeDexAnalysisService(
     var lastInspectRequest: InspectMethodRequest? = null
     var lastFindClassesUsingStringsRequest: FindClassesUsingStringsRequest? = null
     var lastFindMethodsUsingStringsRequest: FindMethodsUsingStringsRequest? = null
+    var lastExportClassSmaliRequest: ExportClassSmaliRequest? = null
+    var lastExportClassJavaRequest: ExportClassJavaRequest? = null
+    var lastExportMethodSmaliRequest: ExportMethodSmaliRequest? = null
+    var lastExportMethodJavaRequest: ExportMethodJavaRequest? = null
     val findClassesUsingStringsRequests = mutableListOf<FindClassesUsingStringsRequest>()
     val findMethodsUsingStringsRequests = mutableListOf<FindMethodsUsingStringsRequest>()
 
@@ -415,20 +536,38 @@ private class FakeDexAnalysisService(
     override fun exportClassDex(workspace: WorkspaceContext, request: ExportClassDexRequest): ExportResult =
         ExportResult(request.outputPath)
 
-    override fun exportClassSmali(workspace: WorkspaceContext, request: ExportClassSmaliRequest): ExportResult =
-        ExportResult(request.outputPath)
+    override fun exportClassSmali(workspace: WorkspaceContext, request: ExportClassSmaliRequest): ExportResult {
+        lastWorkspace = workspace
+        lastExportClassSmaliRequest = request
+        java.io.File(request.outputPath).writeText("class-smali:${request.className}")
+        return ExportResult(request.outputPath)
+    }
 
-    override fun exportClassJava(workspace: WorkspaceContext, request: ExportClassJavaRequest): ExportResult =
-        ExportResult(request.outputPath)
+    override fun exportClassJava(workspace: WorkspaceContext, request: ExportClassJavaRequest): ExportResult {
+        lastWorkspace = workspace
+        lastExportClassJavaRequest = request
+        java.io.File(request.outputPath).writeText("class-java:${request.className}")
+        return ExportResult(request.outputPath)
+    }
 
-    override fun exportMethodSmali(workspace: WorkspaceContext, request: ExportMethodSmaliRequest): ExportResult =
-        ExportResult(request.outputPath)
+    override fun exportMethodSmali(workspace: WorkspaceContext, request: ExportMethodSmaliRequest): ExportResult {
+        lastWorkspace = workspace
+        lastExportMethodSmaliRequest = request
+        java.io.File(request.outputPath).writeText(
+            "method-smali:${request.methodSignature}:${request.mode.name.lowercase()}",
+        )
+        return ExportResult(request.outputPath)
+    }
 
     override fun exportMethodDex(workspace: WorkspaceContext, request: ExportMethodDexRequest): ExportResult =
         ExportResult(request.outputPath)
 
-    override fun exportMethodJava(workspace: WorkspaceContext, request: ExportMethodJavaRequest): ExportResult =
-        ExportResult(request.outputPath)
+    override fun exportMethodJava(workspace: WorkspaceContext, request: ExportMethodJavaRequest): ExportResult {
+        lastWorkspace = workspace
+        lastExportMethodJavaRequest = request
+        java.io.File(request.outputPath).writeText("method-java:${request.methodSignature}")
+        return ExportResult(request.outputPath)
+    }
 }
 
 private class FakeResourceService : ResourceService {

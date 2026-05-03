@@ -514,12 +514,24 @@ P0 `include` 建议支持：
 
 - `session` 或 `workdir`
 - `method_handle` 或 `descriptor`
+- 可选 `source_path`
+- 可选 `source_entry`
 
 建议输出：
 
 - `descriptor`
 - `view="smali"`
 - `text`
+
+补充约定：
+
+- `source_path` / `source_entry`
+  - 用于在同名或同签名对象存在歧义时收窄导出目标
+- `export_method_smali`
+  - P0 应允许 `mode`
+  - 当前建议至少支持：
+    - `snippet`
+    - `class`
 
 ### `export_class_smali`
 
@@ -531,6 +543,8 @@ P0 `include` 建议支持：
 
 - `session` 或 `workdir`
 - `class_handle` 或 `descriptor`
+- 可选 `source_path`
+- 可选 `source_entry`
 
 建议输出：
 
@@ -548,6 +562,8 @@ P0 `include` 建议支持：
 
 - `session` 或 `workdir`
 - `method_handle` 或 `descriptor`
+- 可选 `source_path`
+- 可选 `source_entry`
 
 建议输出：
 
@@ -565,6 +581,8 @@ P0 `include` 建议支持：
 
 - `session` 或 `workdir`
 - `class_handle` 或 `descriptor`
+- 可选 `source_path`
+- 可选 `source_entry`
 
 建议输出：
 
