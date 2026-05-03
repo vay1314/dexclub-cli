@@ -159,8 +159,12 @@ cli init D:/abc/AndroidManifest.xml
 3. `20-workspace-resolution.md`
 4. `30-capability-model.md`
 5. `40-cli-surface.md`
-6. `50-storage-layout.md`
-7. `51-state-file-schemas.md`
-8. `60-execution-flow.md`
-9. `70-pseudocode.md`
+6. `41-inspect-method-command.md`
+7. `42-ai-capability-surface.md`
+8. `43-mcp-tool-surface.md`
+9. `44-skill-workflow.md`
+10. `50-storage-layout.md`
+11. `51-state-file-schemas.md`
+12. `60-execution-flow.md`
+13. `70-pseudocode.md`
 
