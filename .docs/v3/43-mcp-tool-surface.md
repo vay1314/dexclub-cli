@@ -96,6 +96,18 @@ skill 再基于这些对象形成结论。
 - 主要走 `POST /mcp`
 - 由 DexClub 自己的 `open_target_session` 管理业务会话
 
+当前最小运行参数约定：
+
+- `DEXCLUB_MCP_HOST`
+- `DEXCLUB_MCP_PORT`
+- `DEXCLUB_MCP_PATH`
+- `DEXCLUB_MCP_DEBUG`
+
+其中：
+
+- `DEXCLUB_MCP_DEBUG=true` 时，会把 HTTP MCP 的请求/响应摘要打印到 `stderr`
+- 启动日志会明确打印最终监听的 `host:port/path`
+
 这样可以避免将 transport 层 session 与 DexClub 自身 session 语义混在一起。
 
 而不是通过：

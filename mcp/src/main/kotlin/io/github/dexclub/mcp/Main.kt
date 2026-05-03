@@ -30,7 +30,7 @@ fun main() {
 
     System.err.println(
         "DexClub MCP listening on http://${config.host}:${config.port}${config.path} " +
-            "(stateless streamable HTTP, debugHttp=${config.debugHttp})",
+            "(stateless streamable HTTP, debug=${config.debugHttp})",
     )
 
     createHttpServer(config, app, server)
@@ -72,7 +72,7 @@ private fun loadHttpServerConfig(): HttpServerConfig =
         host = System.getenv("DEXCLUB_MCP_HOST")?.trim()?.ifEmpty { null } ?: "127.0.0.1",
         port = System.getenv("DEXCLUB_MCP_PORT")?.trim()?.toIntOrNull() ?: 8787,
         path = normalizePath(System.getenv("DEXCLUB_MCP_PATH")),
-        debugHttp = System.getenv("DEXCLUB_MCP_HTTP_DEBUG")
+        debugHttp = System.getenv("DEXCLUB_MCP_DEBUG")
             ?.trim()
             ?.equals("true", ignoreCase = true)
             ?: false,
@@ -100,15 +100,16 @@ private fun Application.installHttpDebugLogging() {
     intercept(ApplicationCallPipeline.Monitoring) {
         val request = context.request
         val startedAt = System.nanoTime()
+        val path = request.uri.substringBefore('?')
         System.err.println(
-            "HTTP MCP request: method=${request.httpMethod.value} uri=${request.uri} " +
+            "HTTP MCP request: method=${request.httpMethod.value} path=$path uri=${request.uri} " +
                 "accept=${request.headers[HttpHeaders.Accept] ?: ""} contentType=${request.headers[HttpHeaders.ContentType] ?: ""} " +
                 "protocol=${request.headers["Mcp-Protocol-Version"] ?: ""} session=${request.headers["Mcp-Session-Id"] ?: ""}",
         )
         proceed()
         val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
         System.err.println(
-            "HTTP MCP response: method=${request.httpMethod.value} uri=${request.uri} " +
+            "HTTP MCP response: method=${request.httpMethod.value} path=$path uri=${request.uri} " +
                 "status=${context.response.status()?.value ?: 200} elapsedMs=$elapsedMs",
         )
     }
