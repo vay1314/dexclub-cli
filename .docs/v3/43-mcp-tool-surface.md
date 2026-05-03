@@ -125,6 +125,14 @@ MCP tool 面在设计上应默认遵循：
 - 主要调用路径围绕 session 与 handle 展开
 - `workdir` 直接调用只作为 fallback 或启动路径
 
+P0 当前已落地的最小口径是：
+
+- `session` 仍是主路径
+- 多数 P0 tool 已支持 `workdir` fallback
+- `method_handle / class_handle`
+  - 仅在 `session` 路径下有效
+  - `workdir` fallback 不返回、也不接受 handle
+
 ### 2. 对象定位优先级
 
 方法相关 tool 建议统一接受以下二选一：

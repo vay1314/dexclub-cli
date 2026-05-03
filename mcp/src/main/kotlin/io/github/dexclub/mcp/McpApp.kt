@@ -13,6 +13,8 @@ import io.github.dexclub.core.api.shared.MethodSmaliMode
 import io.github.dexclub.core.api.shared.SourceLocator
 import io.github.dexclub.core.api.shared.Services
 import io.github.dexclub.core.api.shared.createDefaultServices
+import io.github.dexclub.core.api.workspace.WorkspaceContext
+import io.github.dexclub.core.api.workspace.WorkspaceRef
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.server.StdioServerTransport
@@ -92,6 +94,7 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("workdir", buildJsonObject { put("type", "string") })
                     put("method_handle", buildJsonObject { put("type", "string") })
                     put("descriptor", buildJsonObject { put("type", "string") })
                     put(
@@ -103,10 +106,10 @@ internal class McpApp(
                     )
                     put("brief", buildJsonObject { put("type", "boolean") })
                 },
-                required = listOf("session_id"),
             ),
         ) { request ->
-            val session = resolveRequiredSession(request) ?: return@addTool missingSessionResult(request)
+            val context = resolveExecutionContext(request) ?: return@addTool missingSessionOrWorkdirResult()
+            val session = context.session
             val methodRef = try {
                 resolveMethodReference(request, session)
             } catch (cause: IllegalArgumentException) {
@@ -132,7 +135,7 @@ internal class McpApp(
             val brief = request.booleanArgument("brief") ?: false
 
             val detail = inspectMethod(
-                session = session,
+                workspace = context.workspace,
                 descriptor = methodRef!!.descriptor,
                 includes = includes,
             )
@@ -141,7 +144,7 @@ internal class McpApp(
                     TextContent(
                         json.encodeToString(
                             InspectMethodResult.serializer(),
-                            session.toInspectMethodResult(detail, brief = brief),
+                            context.toInspectMethodResult(detail, brief = brief),
                         ),
                     ),
                 ),
@@ -154,6 +157,7 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("workdir", buildJsonObject { put("type", "string") })
                     put(
                         "include",
                         buildJsonObject {
@@ -163,10 +167,9 @@ internal class McpApp(
                     )
                     put("include_text", buildJsonObject { put("type", "boolean") })
                 },
-                required = listOf("session_id"),
             ),
         ) { request ->
-            val session = resolveRequiredSession(request) ?: return@addTool missingSessionResult(request)
+            val context = resolveExecutionContext(request) ?: return@addTool missingSessionOrWorkdirResult()
             val includes = try {
                 parseManifestInspectionSections(
                     (request.arguments?.get("include") as? JsonArray)
@@ -180,13 +183,13 @@ internal class McpApp(
                 )
             }
             val includeText = request.arguments?.get("include_text")?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false
-            val manifest = inspectManifest(session, includes, includeText)
+            val manifest = inspectManifest(context.workspace, includes, includeText)
             CallToolResult(
                 content = listOf(
                     TextContent(
                         json.encodeToString(
                             ManifestDecodeResult.serializer(),
-                            session.toManifestDecodeResult(manifest),
+                            context.toManifestDecodeResult(manifest),
                         ),
                     ),
                 ),
@@ -199,12 +202,12 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("workdir", buildJsonObject { put("type", "string") })
                     put("method_handle", buildJsonObject { put("type", "string") })
                     put("descriptor", buildJsonObject { put("type", "string") })
                     put("source_path", buildJsonObject { put("type", "string") })
                     put("source_entry", buildJsonObject { put("type", "string") })
                 },
-                required = listOf("session_id"),
             ),
         ) { request ->
             exportMethodTextTool(
@@ -220,13 +223,13 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("workdir", buildJsonObject { put("type", "string") })
                     put("method_handle", buildJsonObject { put("type", "string") })
                     put("descriptor", buildJsonObject { put("type", "string") })
                     put("source_path", buildJsonObject { put("type", "string") })
                     put("source_entry", buildJsonObject { put("type", "string") })
                     put("mode", buildJsonObject { put("type", "string") })
                 },
-                required = listOf("session_id"),
             ),
         ) { request ->
             exportMethodTextTool(
@@ -242,12 +245,12 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("workdir", buildJsonObject { put("type", "string") })
                     put("class_handle", buildJsonObject { put("type", "string") })
                     put("descriptor", buildJsonObject { put("type", "string") })
                     put("source_path", buildJsonObject { put("type", "string") })
                     put("source_entry", buildJsonObject { put("type", "string") })
                 },
-                required = listOf("session_id"),
             ),
         ) { request ->
             exportClassTextTool(
@@ -263,12 +266,12 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("workdir", buildJsonObject { put("type", "string") })
                     put("class_handle", buildJsonObject { put("type", "string") })
                     put("descriptor", buildJsonObject { put("type", "string") })
                     put("source_path", buildJsonObject { put("type", "string") })
                     put("source_entry", buildJsonObject { put("type", "string") })
                 },
-                required = listOf("session_id"),
             ),
         ) { request ->
             exportClassTextTool(
@@ -284,6 +287,7 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("workdir", buildJsonObject { put("type", "string") })
                     put("class_name_contains", buildJsonObject { put("type", "string") })
                     put("method_name_contains", buildJsonObject { put("type", "string") })
                     put("descriptor_contains", buildJsonObject { put("type", "string") })
@@ -298,10 +302,9 @@ internal class McpApp(
                     )
                     put("brief", buildJsonObject { put("type", "boolean") })
                 },
-                required = listOf("session_id"),
             ),
         ) { request ->
-            val session = resolveRequiredSession(request) ?: return@addTool missingSessionResult(request)
+            val context = resolveExecutionContext(request) ?: return@addTool missingSessionOrWorkdirResult()
             val classNameContains = request.optionalStringArgument("class_name_contains")
             val methodNameContains = request.optionalStringArgument("method_name_contains")
             val descriptorContains = request.optionalStringArgument("descriptor_contains")
@@ -311,14 +314,14 @@ internal class McpApp(
             val fields = try {
                 parseRequestedFields(
                     request.stringArrayArgument("fields"),
-                    supported = methodFieldNamesWithHandle,
+                    supported = if (context.session != null) methodFieldNamesWithHandle else methodFieldNames,
                 )
             } catch (cause: IllegalArgumentException) {
                 return@addTool errorResult(cause.message.orEmpty())
             }
             val hits = try {
                 findMethods(
-                    session = session,
+                    workspace = context.workspace,
                     classNameContains = classNameContains,
                     methodNameContains = methodNameContains,
                     descriptorContains = descriptorContains,
@@ -333,10 +336,12 @@ internal class McpApp(
                     TextContent(
                         json.encodeToString(
                             FindMethodsResult.serializer(),
-                            session.toFindMethodsResult(
+                            context.toFindMethodsResult(
                                 hits,
-                                handleProvider = { hit ->
-                                    sessionStore.putMethodHandle(session.sessionId, hit.descriptor, hit.sourcePath, hit.sourceEntry)
+                                handleProvider = context.session?.let { activeSession ->
+                                    { hit: MethodHit ->
+                                        sessionStore.putMethodHandle(activeSession.sessionId, hit.descriptor, hit.sourcePath, hit.sourceEntry)
+                                    }
                                 },
                                 fields = fields,
                                 brief = brief,
@@ -353,6 +358,7 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("workdir", buildJsonObject { put("type", "string") })
                     put(
                         "contains_any_strings",
                         buildJsonObject {
@@ -378,7 +384,6 @@ internal class McpApp(
                     )
                     put("brief", buildJsonObject { put("type", "boolean") })
                 },
-                required = listOf("session_id"),
             ),
         ) { request ->
             findClassesUsingStringsTool(request)
@@ -390,6 +395,7 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("workdir", buildJsonObject { put("type", "string") })
                     put(
                         "contains_any_strings",
                         buildJsonObject {
@@ -415,7 +421,6 @@ internal class McpApp(
                     )
                     put("brief", buildJsonObject { put("type", "boolean") })
                 },
-                required = listOf("session_id"),
             ),
         ) { request ->
             findMethodsUsingStringsTool(request)
@@ -427,6 +432,7 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("workdir", buildJsonObject { put("type", "string") })
                     put("type", buildJsonObject { put("type", "string") })
                     put("offset", buildJsonObject { put("type", "integer") })
                     put("limit", buildJsonObject { put("type", "integer") })
@@ -439,10 +445,9 @@ internal class McpApp(
                     )
                     put("brief", buildJsonObject { put("type", "boolean") })
                 },
-                required = listOf("session_id"),
             ),
         ) { request ->
-            val session = resolveRequiredSession(request) ?: return@addTool missingSessionResult(request)
+            val context = resolveExecutionContext(request) ?: return@addTool missingSessionOrWorkdirResult()
             val type = request.optionalStringArgument("type")
             val offset = request.intArgument("offset")
             val limit = request.intArgument("limit")
@@ -457,7 +462,7 @@ internal class McpApp(
             }
             val entries = try {
                 listResources(
-                    session = session,
+                    workspace = context.workspace,
                     type = type,
                     offset = offset,
                     limit = limit,
@@ -470,7 +475,7 @@ internal class McpApp(
                     TextContent(
                         json.encodeToString(
                             ListResourcesResult.serializer(),
-                            session.toListResourcesResult(entries, fields = fields, brief = brief),
+                            context.toListResourcesResult(entries, fields = fields, brief = brief),
                         ),
                     ),
                 ),
@@ -483,6 +488,7 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("workdir", buildJsonObject { put("type", "string") })
                     put("type", buildJsonObject { put("type", "string") })
                     put("value", buildJsonObject { put("type", "string") })
                     put("contains", buildJsonObject { put("type", "boolean") })
@@ -501,7 +507,7 @@ internal class McpApp(
                 required = listOf("session_id", "type", "value"),
             ),
         ) { request ->
-            val session = resolveRequiredSession(request) ?: return@addTool missingSessionResult(request)
+            val context = resolveExecutionContext(request) ?: return@addTool missingSessionOrWorkdirResult()
             val type = request.requiredStringArgument("type")
             val value = request.requiredStringArgument("value")
             if (type.isEmpty() || value.isEmpty()) {
@@ -522,7 +528,7 @@ internal class McpApp(
             }
             val hits = try {
                 findResourceValues(
-                    session = session,
+                    workspace = context.workspace,
                     type = type,
                     value = value,
                     contains = contains,
@@ -538,7 +544,7 @@ internal class McpApp(
                     TextContent(
                         json.encodeToString(
                             FindResourcesResult.serializer(),
-                            session.toFindResourcesResult(hits, fields = fields, brief = brief),
+                            context.toFindResourcesResult(hits, fields = fields, brief = brief),
                         ),
                     ),
                 ),
@@ -551,14 +557,14 @@ internal class McpApp(
             inputSchema = ToolSchema(
                 properties = buildJsonObject {
                     put("session_id", buildJsonObject { put("type", "string") })
+                    put("workdir", buildJsonObject { put("type", "string") })
                     put("resource_id", buildJsonObject { put("type", "string") })
                     put("type", buildJsonObject { put("type", "string") })
                     put("name", buildJsonObject { put("type", "string") })
                 },
-                required = listOf("session_id"),
             ),
         ) { request ->
-            val session = resolveRequiredSession(request) ?: return@addTool missingSessionResult(request)
+            val context = resolveExecutionContext(request) ?: return@addTool missingSessionOrWorkdirResult()
             val resourceId = request.optionalStringArgument("resource_id")
             val type = request.optionalStringArgument("type")
             val name = request.optionalStringArgument("name")
@@ -566,7 +572,7 @@ internal class McpApp(
                 return@addTool errorResult("resource_id or type+name is required")
             }
             val resource = getResourceValue(
-                session = session,
+                workspace = context.workspace,
                 resourceId = resourceId,
                 type = type,
                 name = name,
@@ -576,7 +582,7 @@ internal class McpApp(
                     TextContent(
                         json.encodeToString(
                             ResolveResourceResult.serializer(),
-                            session.toResolveResourceResult(resource),
+                            context.toResolveResourceResult(resource),
                         ),
                     ),
                 ),
@@ -599,9 +605,10 @@ internal class McpApp(
     private fun exportMethodTextTool(
         request: CallToolRequest,
         view: String,
-        exporter: (TargetSession, String, SourceLocator, String?) -> String,
+        exporter: (WorkspaceContext, String, SourceLocator, String?) -> String,
     ): CallToolResult {
-        val session = resolveRequiredSession(request) ?: return missingSessionResult(request)
+        val context = resolveExecutionContext(request) ?: return missingSessionOrWorkdirResult()
+        val session = context.session
         val methodRef = try {
             resolveMethodReference(request, session)
         } catch (cause: IllegalArgumentException) {
@@ -615,13 +622,13 @@ internal class McpApp(
         val mode = request.arguments?.get("mode")?.jsonPrimitive?.content?.trim()
 
         return try {
-            val text = exporter(session, descriptor, locator, mode)
+            val text = exporter(context.workspace, descriptor, locator, mode)
             CallToolResult(
                 content = listOf(
                     TextContent(
                         json.encodeToString(
                             ExportTextResult.serializer(),
-                            session.toExportTextResult(descriptor = descriptor, view = view, text = text),
+                            context.toExportTextResult(descriptor = descriptor, view = view, text = text),
                         ),
                     ),
                 ),
@@ -637,9 +644,10 @@ internal class McpApp(
     private fun exportClassTextTool(
         request: CallToolRequest,
         view: String,
-        exporter: (TargetSession, String, SourceLocator) -> String,
+        exporter: (WorkspaceContext, String, SourceLocator) -> String,
     ): CallToolResult {
-        val session = resolveRequiredSession(request) ?: return missingSessionResult(request)
+        val context = resolveExecutionContext(request) ?: return missingSessionOrWorkdirResult()
+        val session = context.session
         val classRef = try {
             resolveClassReference(request, session)
         } catch (cause: IllegalArgumentException) {
@@ -652,13 +660,13 @@ internal class McpApp(
         val locator = request.toSourceLocator(classRef)
 
         return try {
-            val text = exporter(session, descriptor, locator)
+            val text = exporter(context.workspace, descriptor, locator)
             CallToolResult(
                 content = listOf(
                     TextContent(
                         json.encodeToString(
                             ExportTextResult.serializer(),
-                            session.toExportTextResult(descriptor = descriptor, view = view, text = text),
+                            context.toExportTextResult(descriptor = descriptor, view = view, text = text),
                         ),
                     ),
                 ),
@@ -676,11 +684,13 @@ internal class McpApp(
             request = request,
             finder = ::findClassesUsingStrings,
             supportedFields = classFieldNamesWithHandle,
-            renderer = { session, items, fields, brief ->
-                FindClassesUsingStringsResult.serializer() to session.toFindClassesUsingStringsResult(
+            renderer = { context, items, fields, brief ->
+                FindClassesUsingStringsResult.serializer() to context.toFindClassesUsingStringsResult(
                     items,
-                    handleProvider = { hit ->
-                        sessionStore.putClassHandle(session.sessionId, hit.className, hit.sourcePath, hit.sourceEntry)
+                    handleProvider = context.session?.let { activeSession ->
+                        { hit: ClassHit ->
+                            sessionStore.putClassHandle(activeSession.sessionId, hit.className, hit.sourcePath, hit.sourceEntry)
+                        }
                     },
                     fields = fields,
                     brief = brief,
@@ -693,11 +703,13 @@ internal class McpApp(
             request = request,
             finder = ::findMethodsUsingStrings,
             supportedFields = methodFieldNamesWithHandle,
-            renderer = { session, items, fields, brief ->
-                FindMethodsUsingStringsResult.serializer() to session.toFindMethodsUsingStringsResult(
+            renderer = { context, items, fields, brief ->
+                FindMethodsUsingStringsResult.serializer() to context.toFindMethodsUsingStringsResult(
                     items,
-                    handleProvider = { hit ->
-                        sessionStore.putMethodHandle(session.sessionId, hit.descriptor, hit.sourcePath, hit.sourceEntry)
+                    handleProvider = context.session?.let { activeSession ->
+                        { hit: MethodHit ->
+                            sessionStore.putMethodHandle(activeSession.sessionId, hit.descriptor, hit.sourcePath, hit.sourceEntry)
+                        }
                     },
                     fields = fields,
                     brief = brief,
@@ -707,11 +719,12 @@ internal class McpApp(
 
     private fun <T, S> findStringAnchoredItems(
         request: CallToolRequest,
-        finder: (TargetSession, List<String>, List<String>, Int?, Int?) -> T,
+        finder: (WorkspaceContext, List<String>, List<String>, Int?, Int?) -> T,
         supportedFields: Set<String>,
-        renderer: (TargetSession, T, Set<String>?, Boolean) -> Pair<kotlinx.serialization.KSerializer<S>, S>,
+        renderer: (ExecutionContext, T, Set<String>?, Boolean) -> Pair<kotlinx.serialization.KSerializer<S>, S>,
     ): CallToolResult {
-        val session = resolveRequiredSession(request) ?: return missingSessionResult(request)
+        val context = resolveExecutionContext(request) ?: return missingSessionOrWorkdirResult()
+        val session = context.session
         val containsAnyStrings = request.stringArrayArgument("contains_any_strings")
         val containsAllStrings = request.stringArrayArgument("contains_all_strings")
         val offset = request.intArgument("offset")
@@ -720,43 +733,39 @@ internal class McpApp(
         val fields = try {
             parseRequestedFields(
                 request.stringArrayArgument("fields"),
-                supported = supportedFields,
+                supported = if (session != null) supportedFields else supportedFields - setOf("methodHandle", "classHandle"),
             )
         } catch (cause: IllegalArgumentException) {
             return errorResult(cause.message.orEmpty())
         }
 
         val items = try {
-            finder(session, containsAnyStrings, containsAllStrings, offset, limit)
+            finder(context.workspace, containsAnyStrings, containsAllStrings, offset, limit)
         } catch (cause: IllegalArgumentException) {
             return errorResult(cause.message.orEmpty())
         }
 
-        val (serializer, payload) = renderer(session, items, fields, brief)
+        val (serializer, payload) = renderer(context, items, fields, brief)
         return CallToolResult(
             content = listOf(TextContent(json.encodeToString(serializer, payload))),
         )
     }
 
-    private fun resolveRequiredSession(
+    private fun resolveExecutionContext(
         request: CallToolRequest,
-    ): TargetSession? {
-        val sessionId = request.requiredStringArgument("session_id")
-        if (sessionId.isEmpty()) return null
-        return sessionStore.getTargetSession(sessionId)
+    ): ExecutionContext? {
+        val sessionId = request.optionalStringArgument("session_id")
+        if (sessionId != null) {
+            val session = sessionStore.getTargetSession(sessionId) ?: return null
+            return ExecutionContext(session = session, workspace = session.workspace)
+        }
+        val workdir = request.optionalStringArgument("workdir") ?: return null
+        val workspace = services.workspace.open(WorkspaceRef(workdir))
+        return ExecutionContext(session = null, workspace = workspace)
     }
 
-    private fun missingSessionResult(
-        request: CallToolRequest,
-    ): CallToolResult {
-        val sessionId = request.requiredStringArgument("session_id")
-        val error = if (sessionId.isEmpty()) {
-            "session_id is required"
-        } else {
-            "target session not found"
-        }
-        return errorResult(error)
-    }
+    private fun missingSessionOrWorkdirResult(): CallToolResult =
+        errorResult("session_id or workdir is required")
 
     private fun errorResult(message: String): CallToolResult =
         CallToolResult(
@@ -788,30 +797,32 @@ internal class McpApp(
     private fun CallToolRequest.booleanArgument(name: String): Boolean? =
         arguments?.get(name)?.jsonPrimitive?.content?.toBooleanStrictOrNull()
 
-    private fun resolveMethodReference(request: CallToolRequest, session: TargetSession): MethodHandleRef? {
+    private fun resolveMethodReference(request: CallToolRequest, session: TargetSession?): MethodHandleRef? {
         val handle = request.optionalStringArgument("method_handle")
         if (handle != null) {
+            requireNotNull(session) { "method_handle requires session_id" }
             return sessionStore.getMethodHandle(session.sessionId, handle)
                 ?: throw IllegalArgumentException("method_handle not found")
         }
         val descriptor = request.optionalStringArgument("descriptor") ?: return null
         return MethodHandleRef(
-            sessionId = session.sessionId,
+            sessionId = session?.sessionId.orEmpty(),
             descriptor = descriptor,
             sourcePath = request.optionalStringArgument("source_path"),
             sourceEntry = request.optionalStringArgument("source_entry"),
         )
     }
 
-    private fun resolveClassReference(request: CallToolRequest, session: TargetSession): ClassHandleRef? {
+    private fun resolveClassReference(request: CallToolRequest, session: TargetSession?): ClassHandleRef? {
         val handle = request.optionalStringArgument("class_handle")
         if (handle != null) {
+            requireNotNull(session) { "class_handle requires session_id" }
             return sessionStore.getClassHandle(session.sessionId, handle)
                 ?: throw IllegalArgumentException("class_handle not found")
         }
         val descriptor = request.optionalStringArgument("descriptor") ?: return null
         return ClassHandleRef(
-            sessionId = session.sessionId,
+            sessionId = session?.sessionId.orEmpty(),
             descriptor = descriptor,
             sourcePath = request.optionalStringArgument("source_path"),
             sourceEntry = request.optionalStringArgument("source_entry"),
@@ -824,11 +835,11 @@ internal class McpApp(
     }
 
     internal fun inspectMethod(
-        session: TargetSession,
+        workspace: WorkspaceContext,
         descriptor: String,
         includes: Set<io.github.dexclub.core.api.dex.MethodDetailSection>,
     ) = services.dex.inspectMethod(
-        workspace = session.workspace,
+        workspace = workspace,
         request = InspectMethodRequest(
             descriptor = descriptor,
             includes = includes,
@@ -836,11 +847,11 @@ internal class McpApp(
     )
 
     internal fun inspectManifest(
-        session: TargetSession,
+        workspace: WorkspaceContext,
         includes: Set<io.github.dexclub.core.api.resource.ManifestInspectionSection>,
         includeText: Boolean = false,
     ) = services.resource.inspectManifest(
-        workspace = session.workspace,
+        workspace = workspace,
         request = InspectManifestRequest(
             includes = includes,
             includeText = includeText,
@@ -850,12 +861,12 @@ internal class McpApp(
     internal fun getTargetSession(sessionId: String): TargetSession? = sessionStore.getTargetSession(sessionId)
 
     internal fun getResourceValue(
-        session: TargetSession,
+        workspace: WorkspaceContext,
         resourceId: String? = null,
         type: String? = null,
         name: String? = null,
     ) = services.resource.getResourceValue(
-        workspace = session.workspace,
+        workspace = workspace,
         request = ResolveResourceRequest(
             resourceId = resourceId,
             type = type,
@@ -864,15 +875,15 @@ internal class McpApp(
     )
 
     internal fun exportMethodJavaText(
-        session: TargetSession,
+        workspace: WorkspaceContext,
         descriptor: String,
         source: SourceLocator = SourceLocator(),
         mode: String? = null,
     ): String {
         require(mode.isNullOrBlank()) { "mode is only supported for export_method_smali" }
-        return exportTextFile(session) {
+        return exportTextFile(workspace) {
             services.dex.exportMethodJava(
-                workspace = session.workspace,
+                workspace = workspace,
                 request = ExportMethodJavaRequest(
                     methodSignature = descriptor,
                     source = source,
@@ -883,7 +894,7 @@ internal class McpApp(
     }
 
     internal fun exportMethodSmaliText(
-        session: TargetSession,
+        workspace: WorkspaceContext,
         descriptor: String,
         source: SourceLocator = SourceLocator(),
         mode: String? = null,
@@ -893,9 +904,9 @@ internal class McpApp(
             "class" -> MethodSmaliMode.Class
             else -> throw IllegalArgumentException("Unsupported smali mode: $mode")
         }
-        return exportTextFile(session) {
+        return exportTextFile(workspace) {
             services.dex.exportMethodSmali(
-                workspace = session.workspace,
+                workspace = workspace,
                 request = ExportMethodSmaliRequest(
                     methodSignature = descriptor,
                     source = source,
@@ -907,12 +918,12 @@ internal class McpApp(
     }
 
     internal fun exportClassJavaText(
-        session: TargetSession,
+        workspace: WorkspaceContext,
         descriptor: String,
         source: SourceLocator = SourceLocator(),
-    ): String = exportTextFile(session) {
+    ): String = exportTextFile(workspace) {
         services.dex.exportClassJava(
-            workspace = session.workspace,
+            workspace = workspace,
             request = ExportClassJavaRequest(
                 className = descriptor,
                 source = source,
@@ -922,13 +933,13 @@ internal class McpApp(
     }
 
     internal fun listResources(
-        session: TargetSession,
+        workspace: WorkspaceContext,
         type: String? = null,
         offset: Int? = null,
         limit: Int? = null,
     ): WindowedResourceEntries {
         val normalizedType = type?.trim()?.ifEmpty { null }
-        val filtered = services.resource.listResourceEntries(session.workspace)
+        val filtered = services.resource.listResourceEntries(workspace)
             .asSequence()
             .filter { normalizedType == null || it.type == normalizedType }
             .toList()
@@ -936,7 +947,7 @@ internal class McpApp(
     }
 
     internal fun findResourceValues(
-        session: TargetSession,
+        workspace: WorkspaceContext,
         type: String,
         value: String,
         contains: Boolean = false,
@@ -947,7 +958,7 @@ internal class McpApp(
         require(type.isNotBlank()) { "type must not be blank" }
         require(value.isNotBlank()) { "value must not be blank" }
         val hits = services.resource.findResourceValues(
-            workspace = session.workspace,
+            workspace = workspace,
             request = buildFindResourcesRequest(
                 type = type.trim(),
                 value = value,
@@ -959,12 +970,12 @@ internal class McpApp(
     }
 
     internal fun exportClassSmaliText(
-        session: TargetSession,
+        workspace: WorkspaceContext,
         descriptor: String,
         source: SourceLocator = SourceLocator(),
-    ): String = exportTextFile(session) {
+    ): String = exportTextFile(workspace) {
         services.dex.exportClassSmali(
-            workspace = session.workspace,
+            workspace = workspace,
             request = ExportClassSmaliRequest(
                 className = descriptor,
                 source = source,
@@ -973,11 +984,11 @@ internal class McpApp(
         )
     }
 
-    private inline fun exportTextFile(session: TargetSession, block: (Path) -> Unit): String {
+    private inline fun exportTextFile(workspace: WorkspaceContext, block: (Path) -> Unit): String {
         val exportTempRoot = Paths.get(
-            session.workspace.dexclubDir,
+            workspace.dexclubDir,
             "targets",
-            session.workspace.activeTargetId,
+            workspace.activeTargetId,
             "cache",
             "exports",
             "tmp",
@@ -993,7 +1004,7 @@ internal class McpApp(
     }
 
     internal fun findClassesUsingStrings(
-        session: TargetSession,
+        workspace: WorkspaceContext,
         containsAnyStrings: List<String>,
         containsAllStrings: List<String>,
         offset: Int? = null,
@@ -1005,7 +1016,7 @@ internal class McpApp(
 
         val anyHits = if (containsAnyStrings.isNotEmpty()) {
             services.dex.findClassesUsingStrings(
-                workspace = session.workspace,
+                workspace = workspace,
                 request = buildFindClassesUsingStringsRequest(
                     strings = containsAnyStrings,
                     requireAll = false,
@@ -1017,7 +1028,7 @@ internal class McpApp(
 
         val allHits = if (containsAllStrings.isNotEmpty()) {
             services.dex.findClassesUsingStrings(
-                workspace = session.workspace,
+                workspace = workspace,
                 request = buildFindClassesUsingStringsRequest(
                     strings = containsAllStrings,
                     requireAll = true,
@@ -1048,7 +1059,7 @@ internal class McpApp(
     }
 
     internal fun findMethodsUsingStrings(
-        session: TargetSession,
+        workspace: WorkspaceContext,
         containsAnyStrings: List<String>,
         containsAllStrings: List<String>,
         offset: Int? = null,
@@ -1060,7 +1071,7 @@ internal class McpApp(
 
         val anyHits = if (containsAnyStrings.isNotEmpty()) {
             services.dex.findMethodsUsingStrings(
-                workspace = session.workspace,
+                workspace = workspace,
                 request = buildFindMethodsUsingStringsRequest(
                     strings = containsAnyStrings,
                     requireAll = false,
@@ -1072,7 +1083,7 @@ internal class McpApp(
 
         val allHits = if (containsAllStrings.isNotEmpty()) {
             services.dex.findMethodsUsingStrings(
-                workspace = session.workspace,
+                workspace = workspace,
                 request = buildFindMethodsUsingStringsRequest(
                     strings = containsAllStrings,
                     requireAll = true,
@@ -1105,7 +1116,7 @@ internal class McpApp(
     }
 
     internal fun findMethods(
-        session: TargetSession,
+        workspace: WorkspaceContext,
         classNameContains: String? = null,
         methodNameContains: String? = null,
         descriptorContains: String? = null,
@@ -1118,7 +1129,7 @@ internal class McpApp(
             methodNameContains = methodNameContains,
         )
         val baseHits = services.dex.findMethods(
-            workspace = session.workspace,
+            workspace = workspace,
             request = request,
         )
         val filtered = if (normalizedDescriptor == null) {

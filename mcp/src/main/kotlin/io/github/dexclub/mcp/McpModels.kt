@@ -54,19 +54,19 @@ internal data class OpenTargetSessionResult(
 
 @Serializable
 internal data class InspectMethodResult(
-    val sessionId: String,
+    val sessionId: String? = null,
     val detail: MethodDetailView,
 )
 
 @Serializable
 internal data class ManifestDecodeResult(
-    val sessionId: String,
+    val sessionId: String? = null,
     val manifest: ManifestInspectionView,
 )
 
 @Serializable
 internal data class FindClassesUsingStringsResult(
-    val sessionId: String,
+    val sessionId: String? = null,
     val total: Int,
     val offset: Int,
     val limit: Int,
@@ -76,7 +76,7 @@ internal data class FindClassesUsingStringsResult(
 
 @Serializable
 internal data class ExportTextResult(
-    val sessionId: String,
+    val sessionId: String? = null,
     val descriptor: String,
     val view: String,
     val text: String,
@@ -84,7 +84,7 @@ internal data class ExportTextResult(
 
 @Serializable
 internal data class FindMethodsUsingStringsResult(
-    val sessionId: String,
+    val sessionId: String? = null,
     val total: Int,
     val offset: Int,
     val limit: Int,
@@ -94,7 +94,7 @@ internal data class FindMethodsUsingStringsResult(
 
 @Serializable
 internal data class FindMethodsResult(
-    val sessionId: String,
+    val sessionId: String? = null,
     val total: Int,
     val offset: Int,
     val limit: Int,
@@ -104,13 +104,13 @@ internal data class FindMethodsResult(
 
 @Serializable
 internal data class ResolveResourceResult(
-    val sessionId: String,
+    val sessionId: String? = null,
     val resource: ResourceValueView,
 )
 
 @Serializable
 internal data class ListResourcesResult(
-    val sessionId: String,
+    val sessionId: String? = null,
     val total: Int,
     val offset: Int,
     val limit: Int,
@@ -120,7 +120,7 @@ internal data class ListResourcesResult(
 
 @Serializable
 internal data class FindResourcesResult(
-    val sessionId: String,
+    val sessionId: String? = null,
     val total: Int,
     val offset: Int,
     val limit: Int,
@@ -140,6 +140,14 @@ internal typealias WindowedClassHits = WindowedItems<ClassHit>
 internal typealias WindowedMethodHits = WindowedItems<MethodHit>
 internal typealias WindowedResourceEntries = WindowedItems<ResourceEntry>
 internal typealias WindowedResourceValueHits = WindowedItems<ResourceEntryValueHit>
+
+internal data class ExecutionContext(
+    val session: TargetSession?,
+    val workspace: WorkspaceContext,
+)
+
+internal fun TargetSession.sessionContext(): ExecutionContext =
+    ExecutionContext(session = this, workspace = workspace)
 
 internal val methodFieldNames = setOf("className", "methodName", "descriptor", "sourcePath", "sourceEntry")
 internal val methodFieldNamesWithHandle = methodFieldNames + "methodHandle"
@@ -445,90 +453,87 @@ internal fun TargetSession.toResult(): OpenTargetSessionResult =
         workspace = workspace.toView(),
     )
 
-internal fun TargetSession.toInspectMethodResult(detail: MethodDetail): InspectMethodResult =
-    toInspectMethodResult(detail, brief = false)
-
-internal fun TargetSession.toInspectMethodResult(detail: MethodDetail, brief: Boolean): InspectMethodResult =
+internal fun ExecutionContext.toInspectMethodResult(detail: MethodDetail, brief: Boolean): InspectMethodResult =
     InspectMethodResult(
-        sessionId = sessionId,
+        sessionId = session?.sessionIdOrNull(),
         detail = detail.toView(brief = brief),
     )
 
-internal fun TargetSession.toManifestDecodeResult(result: ManifestInspectionResult): ManifestDecodeResult =
+internal fun ExecutionContext.toManifestDecodeResult(result: ManifestInspectionResult): ManifestDecodeResult =
     ManifestDecodeResult(
-        sessionId = sessionId,
+        sessionId = session?.sessionIdOrNull(),
         manifest = result.toView(),
     )
 
-internal fun TargetSession.toFindClassesUsingStringsResult(
+internal fun ExecutionContext.toFindClassesUsingStringsResult(
     result: WindowedClassHits,
-    handleProvider: (ClassHit) -> String,
+    handleProvider: ((ClassHit) -> String)? = null,
     fields: Set<String>? = null,
     brief: Boolean = false,
 ): FindClassesUsingStringsResult =
     FindClassesUsingStringsResult(
-        sessionId = sessionId,
+        sessionId = session?.sessionIdOrNull(),
         total = result.total,
         offset = result.offset,
         limit = result.limit,
         hasMore = result.hasMore,
-        items = result.items.map { it.toProjectedJson(effectiveClassFields(fields, brief), handleProvider) },
+        items = result.items.map { it.toProjectedJson(effectiveClassFields(fields, brief, handleProvider != null), handleProvider) },
     )
 
-internal fun TargetSession.toExportTextResult(
+internal fun ExecutionContext.toExportTextResult(
     descriptor: String,
     view: String,
     text: String,
 ): ExportTextResult = ExportTextResult(
-    sessionId = sessionId,
+    sessionId = session?.sessionIdOrNull(),
     descriptor = descriptor,
     view = view,
     text = text,
 )
 
-internal fun TargetSession.toFindMethodsUsingStringsResult(
+internal fun ExecutionContext.toFindMethodsUsingStringsResult(
     result: WindowedMethodHits,
-    handleProvider: (MethodHit) -> String,
+    handleProvider: ((MethodHit) -> String)? = null,
     fields: Set<String>? = null,
     brief: Boolean = false,
 ): FindMethodsUsingStringsResult =
     FindMethodsUsingStringsResult(
-        sessionId = sessionId,
+        sessionId = session?.sessionIdOrNull(),
         total = result.total,
         offset = result.offset,
         limit = result.limit,
         hasMore = result.hasMore,
-        items = result.items.map { it.toProjectedJson(effectiveMethodFields(fields, brief), handleProvider) },
+        items = result.items.map { it.toProjectedJson(effectiveMethodFields(fields, brief, handleProvider != null), handleProvider) },
     )
 
-internal fun TargetSession.toFindMethodsResult(
+internal fun ExecutionContext.toFindMethodsResult(
     result: WindowedMethodHits,
-    handleProvider: (MethodHit) -> String,
+    handleProvider: ((MethodHit) -> String)? = null,
     fields: Set<String>? = null,
     brief: Boolean = false,
 ): FindMethodsResult =
     FindMethodsResult(
-        sessionId = sessionId,
+        sessionId = session?.sessionIdOrNull(),
         total = result.total,
         offset = result.offset,
         limit = result.limit,
         hasMore = result.hasMore,
-        items = result.items.map { it.toProjectedJson(effectiveMethodFields(fields, brief), handleProvider) },
+        items = result.items.map { it.toProjectedJson(effectiveMethodFields(fields, brief, handleProvider != null), handleProvider) },
     )
 
-internal fun TargetSession.toResolveResourceResult(result: io.github.dexclub.core.api.resource.ResourceValue): ResolveResourceResult =
+internal fun ExecutionContext.toResolveResourceResult(result: io.github.dexclub.core.api.resource.ResourceValue): ResolveResourceResult =
     ResolveResourceResult(
-        sessionId = sessionId,
+        sessionId = session?.sessionIdOrNull(),
         resource = ResourceValueView.from(result),
     )
 
-internal fun TargetSession.toListResourcesResult(
+internal fun ExecutionContext.toListResourcesResult(
     result: WindowedResourceEntries,
     fields: Set<String>? = null,
     brief: Boolean = false,
 ): ListResourcesResult =
     ListResourcesResult(
-        sessionId = sessionId,
+        sessionId = session?.sessionIdOrNull(),
         total = result.total,
         offset = result.offset,
         limit = result.limit,
@@ -536,13 +541,13 @@ internal fun TargetSession.toListResourcesResult(
         items = result.items.map { it.toProjectedJson(effectiveResourceEntryFields(fields, brief)) },
     )
 
-internal fun TargetSession.toFindResourcesResult(
+internal fun ExecutionContext.toFindResourcesResult(
     result: WindowedResourceValueHits,
     fields: Set<String>? = null,
     brief: Boolean = false,
 ): FindResourcesResult =
     FindResourcesResult(
-        sessionId = sessionId,
+        sessionId = session?.sessionIdOrNull(),
         total = result.total,
         offset = result.offset,
         limit = result.limit,
@@ -868,11 +873,21 @@ internal fun parseRequestedFields(rawValues: List<String>?, supported: Set<Strin
     return normalized.toSet()
 }
 
-private fun effectiveMethodFields(fields: Set<String>?, brief: Boolean): Set<String> =
-    fields ?: if (brief) setOf("descriptor", "sourcePath", "sourceEntry", "methodHandle") else methodFieldNamesWithHandle
+private fun effectiveMethodFields(fields: Set<String>?, brief: Boolean, handleEnabled: Boolean): Set<String> =
+    fields ?: if (brief) {
+        if (handleEnabled) setOf("descriptor", "sourcePath", "sourceEntry", "methodHandle")
+        else setOf("descriptor", "sourcePath", "sourceEntry")
+    } else {
+        if (handleEnabled) methodFieldNamesWithHandle else methodFieldNames
+    }
 
-private fun effectiveClassFields(fields: Set<String>?, brief: Boolean): Set<String> =
-    fields ?: if (brief) setOf("className", "classHandle") else classFieldNamesWithHandle
+private fun effectiveClassFields(fields: Set<String>?, brief: Boolean, handleEnabled: Boolean): Set<String> =
+    fields ?: if (brief) {
+        if (handleEnabled) setOf("className", "classHandle")
+        else setOf("className")
+    } else {
+        if (handleEnabled) classFieldNamesWithHandle else classFieldNames
+    }
 
 private fun effectiveResourceEntryFields(fields: Set<String>?, brief: Boolean): Set<String> =
     fields ?: if (brief) setOf("resourceId", "type", "name") else resourceEntryFieldNames
@@ -880,23 +895,25 @@ private fun effectiveResourceEntryFields(fields: Set<String>?, brief: Boolean): 
 private fun effectiveResourceValueFields(fields: Set<String>?, brief: Boolean): Set<String> =
     fields ?: if (brief) setOf("resourceId", "type", "name", "value") else resourceValueFieldNames
 
-private fun MethodHit.toProjectedJson(fields: Set<String>, handleProvider: (MethodHit) -> String): JsonObject =
+private fun MethodHit.toProjectedJson(fields: Set<String>, handleProvider: ((MethodHit) -> String)?): JsonObject =
     buildJsonObject {
         if ("className" in fields) put("className", className)
         if ("methodName" in fields) put("methodName", methodName)
         if ("descriptor" in fields) put("descriptor", descriptor)
         if ("sourcePath" in fields && sourcePath != null) put("sourcePath", sourcePath)
         if ("sourceEntry" in fields && sourceEntry != null) put("sourceEntry", sourceEntry)
-        if ("methodHandle" in fields) put("methodHandle", handleProvider(this@toProjectedJson))
+        if ("methodHandle" in fields) put("methodHandle", requireNotNull(handleProvider) { "methodHandle requires session_id" }(this@toProjectedJson))
     }
 
-private fun ClassHit.toProjectedJson(fields: Set<String>, handleProvider: (ClassHit) -> String): JsonObject =
+private fun ClassHit.toProjectedJson(fields: Set<String>, handleProvider: ((ClassHit) -> String)?): JsonObject =
     buildJsonObject {
         if ("className" in fields) put("className", className)
         if ("sourcePath" in fields && sourcePath != null) put("sourcePath", sourcePath)
         if ("sourceEntry" in fields && sourceEntry != null) put("sourceEntry", sourceEntry)
-        if ("classHandle" in fields) put("classHandle", handleProvider(this@toProjectedJson))
+        if ("classHandle" in fields) put("classHandle", requireNotNull(handleProvider) { "classHandle requires session_id" }(this@toProjectedJson))
     }
+
+private fun TargetSession.sessionIdOrNull(): String? = sessionId.takeIf(String::isNotBlank)
 
 private fun ResourceEntry.toProjectedJson(fields: Set<String>): JsonObject =
     buildJsonObject {

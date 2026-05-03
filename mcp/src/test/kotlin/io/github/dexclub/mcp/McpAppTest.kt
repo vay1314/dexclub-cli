@@ -87,6 +87,67 @@ class McpAppTest {
     }
 
     @Test
+    fun findMethodsSupportsWorkdirFallbackWithoutSession() {
+        val workspace = fakeWorkspaceContext()
+        val workspaceService = FakeWorkspaceService(workspace)
+        val dexService = FakeDexAnalysisService(
+            findMethodsResponse = listOf(
+                MethodHit(
+                    className = "fixture.samples.SampleSearchTarget",
+                    methodName = "exposeNeedle",
+                    descriptor = "Lfixture/samples/SampleSearchTarget;->exposeNeedle()Ljava/lang/String;",
+                ),
+            ),
+        )
+        val app = McpApp(
+            services = Services(
+                workspace = workspaceService,
+                dex = dexService,
+                resource = FakeResourceService(),
+            ),
+            sessionStore = McpSessionStore(),
+        )
+
+        val hits = app.findMethods(
+            workspace = workspace,
+            classNameContains = "SampleSearch",
+            methodNameContains = "expose",
+        )
+        val result = ExecutionContext(session = null, workspace = workspace).toFindMethodsResult(
+            hits,
+            handleProvider = null,
+            fields = setOf("descriptor"),
+        )
+
+        assertEquals(null, workspaceService.openedRef)
+        assertEquals(null, result.sessionId)
+        assertEquals(setOf("descriptor"), result.items.single().keys)
+    }
+
+    @Test
+    fun exportMethodJavaTextSupportsWorkspaceFallback() {
+        val workspace = fakeWorkspaceContext()
+        val dexService = FakeDexAnalysisService()
+        val app = McpApp(
+            services = Services(
+                workspace = FakeWorkspaceService(workspace),
+                dex = dexService,
+                resource = FakeResourceService(),
+            ),
+            sessionStore = McpSessionStore(),
+        )
+
+        val text = app.exportMethodJavaText(
+            workspace = workspace,
+            descriptor = "Lsample/Test;->foo()V",
+            source = SourceLocator(sourcePath = "sample.apk", sourceEntry = "classes.dex"),
+        )
+
+        assertEquals("Lsample/Test;->foo()V", dexService.lastExportMethodJavaRequest?.methodSignature)
+        assertEquals("method-java:Lsample/Test;->foo()V", text)
+    }
+
+    @Test
     fun inspectMethodUsesSessionWorkspaceAndIncludes() {
         val workspace = fakeWorkspaceContext()
         val workspaceService = FakeWorkspaceService(workspace)
@@ -114,7 +175,7 @@ class McpAppTest {
         val session = app.openTargetSession("sample.apk")
 
         val detail = app.inspectMethod(
-            session = session,
+            workspace = session.workspace,
             descriptor = "Lsample/Test;->foo()V",
             includes = setOf(MethodDetailSection.Strings, MethodDetailSection.Annotations),
         )
@@ -141,7 +202,7 @@ class McpAppTest {
         val session = app.openTargetSession("sample.apk")
 
         val manifest = app.inspectManifest(
-            session,
+            workspace = session.workspace,
             includes = ManifestInspectionSection.entries.toSet(),
             includeText = true,
         )
@@ -223,7 +284,7 @@ class McpAppTest {
     @Test
     fun inspectMethodBriefReturnsCountsWithoutExpandedSections() {
         val session = McpSessionStore().openTargetSession(fakeWorkspaceContext())
-        val result = session.toInspectMethodResult(
+        val result = session.sessionContext().toInspectMethodResult(
             detail = MethodDetail(
                 method = MethodHit(
                     className = "Lsample/Test;",
@@ -306,7 +367,7 @@ class McpAppTest {
         val session = app.openTargetSession("sample.apk")
 
         val hits = app.findMethodsUsingStrings(
-            session = session,
+            workspace = session.workspace,
             containsAnyStrings = listOf("needle-a", "needle-b"),
             containsAllStrings = listOf("must-have"),
             offset = 1,
@@ -362,7 +423,7 @@ class McpAppTest {
         val session = app.openTargetSession("sample.apk")
 
         val hits = app.findMethods(
-            session = session,
+            workspace = session.workspace,
             classNameContains = "SampleSearch",
             methodNameContains = "expose",
             descriptorContains = "Needle",
@@ -391,7 +452,7 @@ class McpAppTest {
     @Test
     fun findMethodsResultSupportsFieldProjectionAndBrief() {
         val session = McpSessionStore().openTargetSession(fakeWorkspaceContext())
-        val result = session.toFindMethodsResult(
+        val result = session.sessionContext().toFindMethodsResult(
             result = WindowedItems(
                 total = 2,
                 offset = 0,
@@ -447,7 +508,7 @@ class McpAppTest {
     @Test
     fun findMethodsResultCanProjectMethodHandle() {
         val session = McpSessionStore().openTargetSession(fakeWorkspaceContext())
-        val result = session.toFindMethodsResult(
+        val result = session.sessionContext().toFindMethodsResult(
             result = WindowedItems(
                 total = 1,
                 offset = 0,
@@ -471,7 +532,7 @@ class McpAppTest {
     @Test
     fun findClassesUsingStringsResultCanProjectClassHandle() {
         val session = McpSessionStore().openTargetSession(fakeWorkspaceContext())
-        val result = session.toFindClassesUsingStringsResult(
+        val result = session.sessionContext().toFindClassesUsingStringsResult(
             result = WindowedItems(
                 total = 1,
                 offset = 0,
@@ -566,7 +627,7 @@ class McpAppTest {
         val session = app.openTargetSession("sample.apk")
 
         val hits = app.findClassesUsingStrings(
-            session = session,
+            workspace = session.workspace,
             containsAnyStrings = listOf("needle-a", "needle-b"),
             containsAllStrings = listOf("must-have"),
             offset = 1,
@@ -616,7 +677,7 @@ class McpAppTest {
         val session = app.openTargetSession("sample.apk")
 
         val text = app.exportMethodJavaText(
-            session = session,
+            workspace = session.workspace,
             descriptor = "Lsample/Test;->foo()V",
             source = SourceLocator(sourcePath = "sample.apk", sourceEntry = "classes.dex"),
         )
@@ -646,7 +707,7 @@ class McpAppTest {
         val session = app.openTargetSession("sample.apk")
 
         val text = app.exportMethodSmaliText(
-            session = session,
+            workspace = session.workspace,
             descriptor = "Lsample/Test;->foo()V",
             source = SourceLocator(sourcePath = "sample.apk", sourceEntry = "classes.dex"),
             mode = "class",
@@ -675,7 +736,7 @@ class McpAppTest {
         val session = app.openTargetSession("sample.apk")
 
         val text = app.exportClassJavaText(
-            session = session,
+            workspace = session.workspace,
             descriptor = "Lsample/Test;",
             source = SourceLocator(sourcePath = "sample.apk", sourceEntry = "classes.dex"),
         )
@@ -703,7 +764,7 @@ class McpAppTest {
         val session = app.openTargetSession("sample.apk")
 
         val text = app.exportClassSmaliText(
-            session = session,
+            workspace = session.workspace,
             descriptor = "Lsample/Test;",
             source = SourceLocator(sourcePath = "sample.apk", sourceEntry = "classes.dex"),
         )
@@ -731,7 +792,7 @@ class McpAppTest {
         val session = app.openTargetSession("sample.apk")
 
         val resource = app.getResourceValue(
-            session = session,
+            workspace = session.workspace,
             resourceId = "0x7f010001",
         )
 
@@ -757,7 +818,7 @@ class McpAppTest {
         val session = app.openTargetSession("sample.apk")
 
         val resource = app.getResourceValue(
-            session = session,
+            workspace = session.workspace,
             type = "string",
             name = "fixture_name",
         )
@@ -814,7 +875,7 @@ class McpAppTest {
         val session = app.openTargetSession("sample.apk")
 
         val result = app.listResources(
-            session = session,
+            workspace = session.workspace,
             type = "string",
             offset = 1,
             limit = 1,
@@ -863,7 +924,7 @@ class McpAppTest {
         val session = app.openTargetSession("sample.apk")
 
         val result = app.findResourceValues(
-            session = session,
+            workspace = session.workspace,
             type = "string",
             value = "Needle",
             contains = true,
@@ -922,6 +983,7 @@ private class FakeWorkspaceService(
     private val workspace: WorkspaceContext,
 ) : WorkspaceService {
     var initializedInput: String? = null
+    var openedRef: WorkspaceRef? = null
 
     override fun initialize(input: String): WorkspaceContext {
         initializedInput = input
@@ -930,7 +992,10 @@ private class FakeWorkspaceService(
 
     override fun switchTarget(ref: WorkspaceRef, input: String): WorkspaceRef = ref
 
-    override fun open(ref: WorkspaceRef): WorkspaceContext = workspace
+    override fun open(ref: WorkspaceRef): WorkspaceContext {
+        openedRef = ref
+        return workspace
+    }
 
     override fun listTargets(ref: WorkspaceRef): List<TargetSummary> = emptyList()
 
