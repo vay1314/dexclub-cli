@@ -75,6 +75,122 @@ skill 不应把分析任务理解为：
 6. 若当前路径证据不足，则回退并尝试另一条定位路径
 7. 当证据足以支持判断时，再形成结论
 
+## skill v1 硬约束
+
+以下约束不是“推荐风格”，而是 skill v1 为避免高成本误用、会话失效和错误导出而必须遵守的默认规则。
+
+### 1. 默认 `session-first`
+
+- 除非明确只是一次性轻查询，否则先 `open_target_session`
+- 后续优先使用 `session_id`
+- 已有 `session_id` 后，不应继续习惯性回退到 `workdir`
+
+### 2. `session / handle` 失效必须可恢复
+
+- `session_id not found`
+  - 重新 `open_target_session`
+  - 回到最近一步恢复分析
+- `method_handle / class_handle not found`
+  - 回到上一步 `find_*` 或 `inspect_*`
+  - 重新获取真实 handle
+
+skill 不应把这类错误直接视为终局失败。
+
+### 3. 默认先 `brief + fields`
+
+- `find_*`
+- `list_res`
+- `find_resource_values`
+
+默认应优先使用：
+
+- `brief=true`
+- 最小必要 `fields`
+
+只有在继续下钻确有必要时，才展开更多字段。
+
+### 4. 默认参数最小化
+
+skill 不应在已有稳定上下文后，继续重复传递无关或可推导参数。
+
+具体包括：
+
+- 已有 `session_id` 后，不应继续习惯性附带 `workdir`
+- 非必要时，不应同时附带 `session_id` 与 `workdir`
+- 已有 handle 后，不应继续重复传完整 descriptor 与 source 约束，除非当前任务明确需要消歧
+- 默认不传与当前判断无关的 `include`、`fields`、`include_text`
+
+默认目标应是：
+
+- 只传完成当前一步判断所需的最小参数集合
+
+### 5. 默认先 `inspect`，后 `export`
+
+`export_*` 是重操作，不应作为默认第一步。
+
+默认顺序应收敛为：
+
+1. `find_*`
+2. `inspect_method`
+3. `export_*`
+
+只有在已知对象非常明确且当前任务直接需要证据文本时，才允许跳过检查阶段。
+
+### 6. `manifest` 默认只看结构化结果
+
+- 默认不传 `include_text=true`
+- 只有明确需要原始 XML 取证时，才拉 manifest 原文
+
+### 7. 禁止手工构造 handle
+
+- `method_handle`
+- `class_handle`
+
+只能来自前序真实 MCP 结果。
+
+skill 不应：
+
+- 猜测 handle
+- 拼接占位符
+- 伪造对象引用
+
+### 8. 候选缩小到足够小再导出
+
+当候选对象仍然较多时，skill 应继续筛选，而不是批量导出大文本。
+
+skill v1 默认应控制：
+
+- 方法导出不超过 `1~2` 个
+- 类导出不超过 `1` 个
+
+超出这一范围时，应先继续定位、检查或回退。
+
+### 9. 默认只走一条最低成本入口
+
+skill 在第一轮定位时，不应同时展开多条高成本入口路径。
+
+默认应：
+
+- 先选择一条最低成本但足以启动的入口
+- 在当前入口证据不足时，再回退并切到下一条入口
+
+不应在尚未形成初步判断时，同时并行展开：
+
+- `manifest include_text=true`
+- 大范围 `list_res`
+- 宽泛 `find_methods`
+- 多个 `export_*`
+
+### 10. 入口优先级必须明确
+
+黑盒样本下，skill 默认应优先：
+
+1. 字符串锚点
+2. manifest / 资源入口
+3. 普通 `find_methods`
+
+不应在缺乏线索时一上来就做宽泛方法搜索。
+
 ## skill 的输入理解
 
 用户输入给 skill 的，不一定是：
@@ -198,6 +314,7 @@ skill 应根据当前问题、已有对象和证据强度，决定：
 - `find_resource_values`
 - `get_resource_value`
 - `list_res`
+- 必要时才使用 `find_methods`
 
 skill 在这一阶段的目标不是拿结论，而是：
 
@@ -211,7 +328,7 @@ skill 在这一阶段的目标不是拿结论，而是：
 
 - 优先类级候选，再缩到方法
 - 优先和当前问题线索最强相关的对象
-- 优先返回字段更完整的候选
+- 默认先使用 `brief + fields`，只扩足以支持下一步判断的字段
 
 ### 3. 检查
 
@@ -225,6 +342,7 @@ skill 在这一阶段的目标不是拿结论，而是：
 
 - 这个对象是否值得继续下钻
 - 当前问题需要的关键一层事实是否已经存在
+- 当前是否已经足够形成结论，而不必立即导出大文本
 
 ### 4. 取证
 
@@ -248,6 +366,12 @@ skill 在这一阶段的目标不是拿结论，而是：
 - `smali`
   - 更适合做真实性确认和消歧
 
+但 skill v1 必须先满足：
+
+- 候选数量已经足够小
+- 当前导出有明确目的
+- 不是把导出当成“继续猜”的替代品
+
 ### 5. 回退
 
 当当前路径出现以下情况时，skill 应回退：
@@ -258,6 +382,23 @@ skill 在这一阶段的目标不是拿结论，而是：
 - 当前路径开始消耗大量成本但没有明显增益
 
 回退不是失败，而是正式工作流的一部分。
+
+## skill 的错误恢复约束
+
+skill 需要把以下情况视为“可恢复分支”，而不是终局失败：
+
+- `session_id not found`
+- `method_handle not found`
+- `class_handle not found`
+- `include section` 不支持
+
+默认恢复策略是：
+
+1. 先判断是上下文失效还是参数错误
+2. 上下文失效则重建 session 或重新获取 handle
+3. 参数错误则收敛字段或 include，再重试
+
+skill 不应在遇到这类错误后直接切回 shell/源码路径。
 
 ## skill 的视图选择原则
 
