@@ -215,6 +215,76 @@ class McpAppTest {
         assertEquals("At least one non-blank string filter is required", error.message)
     }
 
+    @Test
+    fun findClassesUsingStringsUsesSessionWorkspaceAndMapsShortInputs() {
+        val workspace = fakeWorkspaceContext()
+        val workspaceService = FakeWorkspaceService(workspace)
+        val dexService = FakeDexAnalysisService(
+            findClassesUsingStringsResponses = listOf(
+                listOf(
+                    ClassHit(
+                        className = "Lfixture/samples/SampleSearchTarget;",
+                        sourcePath = "fixture.dex",
+                        sourceEntry = null,
+                    ),
+                    ClassHit(
+                        className = "Lfixture/samples/OtherTarget;",
+                        sourcePath = "fixture.dex",
+                        sourceEntry = null,
+                    ),
+                ),
+                listOf(
+                    ClassHit(
+                        className = "Lfixture/samples/SampleSearchTarget;",
+                        sourcePath = "fixture.dex",
+                        sourceEntry = null,
+                    ),
+                ),
+            ),
+        )
+        val app = McpApp(
+            services = Services(
+                workspace = workspaceService,
+                dex = dexService,
+                resource = FakeResourceService(),
+            ),
+            sessionStore = McpSessionStore(),
+        )
+        val session = app.openTargetSession("sample.apk")
+
+        val hits = app.findClassesUsingStrings(
+            session = session,
+            containsAnyStrings = listOf("needle-a", "needle-b"),
+            containsAllStrings = listOf("must-have"),
+            offset = 1,
+            limit = 5,
+        )
+
+        assertEquals(workspace, dexService.lastWorkspace)
+        assertEquals(2, dexService.findClassesUsingStringsRequests.size)
+        val anyQuery = Json.parseToJsonElement(dexService.findClassesUsingStringsRequests[0].queryText).jsonObject["groups"]!!.jsonObject
+        assertEquals(1, anyQuery["any-0"]!!.jsonArray.size)
+        assertEquals("needle-a", anyQuery["any-0"]!!.jsonArray[0].jsonObject["value"]!!.jsonPrimitive.content)
+        assertEquals("needle-b", anyQuery["any-1"]!!.jsonArray[0].jsonObject["value"]!!.jsonPrimitive.content)
+        val allQuery = Json.parseToJsonElement(dexService.findClassesUsingStringsRequests[1].queryText).jsonObject["groups"]!!.jsonObject
+        assertEquals(1, allQuery["all"]!!.jsonArray.size)
+        assertEquals("must-have", allQuery["all"]!!.jsonArray[0].jsonObject["value"]!!.jsonPrimitive.content)
+        assertEquals(1, hits.total)
+        assertTrue(hits.items.isEmpty())
+    }
+
+    @Test
+    fun buildFindClassesUsingStringsRequestRejectsEmptyFilters() {
+        val error = kotlin.test.assertFailsWith<IllegalArgumentException> {
+            buildFindClassesUsingStringsRequest(
+                strings = emptyList(),
+                requireAll = false,
+            )
+        }
+
+        assertEquals("At least one non-blank string filter is required", error.message)
+    }
+
     private fun fakeWorkspaceContext(): WorkspaceContext =
         WorkspaceContext(
             workdir = "D:/tmp/workspace",
@@ -298,11 +368,14 @@ private class FakeDexAnalysisService(
             descriptor = "Lsample/Test;->foo()V",
         ),
     ),
+    private val findClassesUsingStringsResponses: List<List<ClassHit>> = emptyList(),
     private val findMethodsUsingStringsResponses: List<List<MethodHit>> = emptyList(),
 ) : DexAnalysisService {
     var lastWorkspace: WorkspaceContext? = null
     var lastInspectRequest: InspectMethodRequest? = null
+    var lastFindClassesUsingStringsRequest: FindClassesUsingStringsRequest? = null
     var lastFindMethodsUsingStringsRequest: FindMethodsUsingStringsRequest? = null
+    val findClassesUsingStringsRequests = mutableListOf<FindClassesUsingStringsRequest>()
     val findMethodsUsingStringsRequests = mutableListOf<FindMethodsUsingStringsRequest>()
 
     override fun findClasses(workspace: WorkspaceContext, request: FindClassesRequest): List<ClassHit> = emptyList()
@@ -314,7 +387,13 @@ private class FakeDexAnalysisService(
     override fun findClassesUsingStrings(
         workspace: WorkspaceContext,
         request: FindClassesUsingStringsRequest,
-    ): List<ClassHit> = emptyList()
+    ): List<ClassHit> {
+        lastWorkspace = workspace
+        lastFindClassesUsingStringsRequest = request
+        findClassesUsingStringsRequests += request
+        val nextIndex = findClassesUsingStringsRequests.size - 1
+        return findClassesUsingStringsResponses.getOrElse(nextIndex) { emptyList() }
+    }
 
     override fun findMethodsUsingStrings(
         workspace: WorkspaceContext,

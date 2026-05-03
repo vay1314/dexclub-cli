@@ -1,6 +1,7 @@
 package io.github.dexclub.mcp
 
 import io.github.dexclub.core.api.dex.ClassHit
+import io.github.dexclub.core.api.dex.FindClassesUsingStringsRequest
 import io.github.dexclub.core.api.dex.FindMethodsUsingStringsRequest
 import io.github.dexclub.core.api.dex.FieldHit
 import io.github.dexclub.core.api.dex.FieldUsageType
@@ -16,6 +17,7 @@ import io.github.dexclub.core.api.shared.WorkspaceKind
 import io.github.dexclub.core.api.workspace.TargetHandle
 import io.github.dexclub.core.api.workspace.TargetSnapshotSummary
 import io.github.dexclub.core.api.workspace.WorkspaceContext
+import io.github.dexclub.dexkit.query.BatchFindClassUsingStrings
 import io.github.dexclub.dexkit.query.BatchFindMethodUsingStrings
 import io.github.dexclub.dexkit.query.StringMatchType
 import io.github.dexclub.dexkit.query.StringMatcher
@@ -35,10 +37,22 @@ internal data class InspectMethodResult(
 )
 
 @Serializable
+internal data class FindClassesUsingStringsResult(
+    val sessionId: String,
+    val total: Int,
+    val items: List<ClassHitView>,
+)
+
+@Serializable
 internal data class FindMethodsUsingStringsResult(
     val sessionId: String,
     val total: Int,
     val items: List<MethodHitView>,
+)
+
+internal data class WindowedClassHits(
+    val total: Int,
+    val items: List<ClassHit>,
 )
 
 internal data class WindowedMethodHits(
@@ -116,6 +130,13 @@ internal data class MethodHitView(
 )
 
 @Serializable
+internal data class ClassHitView(
+    val className: String,
+    val sourcePath: String? = null,
+    val sourceEntry: String? = null,
+)
+
+@Serializable
 internal data class FieldHitView(
     val className: String,
     val fieldName: String,
@@ -155,6 +176,13 @@ internal fun TargetSession.toInspectMethodResult(detail: MethodDetail): InspectM
     InspectMethodResult(
         sessionId = sessionId,
         detail = detail.toView(),
+    )
+
+internal fun TargetSession.toFindClassesUsingStringsResult(result: WindowedClassHits): FindClassesUsingStringsResult =
+    FindClassesUsingStringsResult(
+        sessionId = sessionId,
+        total = result.total,
+        items = result.items.map(ClassHit::toView),
     )
 
 internal fun TargetSession.toFindMethodsUsingStringsResult(result: WindowedMethodHits): FindMethodsUsingStringsResult =
@@ -233,6 +261,13 @@ internal fun MethodHit.toView(): MethodHitView =
         sourceEntry = sourceEntry,
     )
 
+internal fun ClassHit.toView(): ClassHitView =
+    ClassHitView(
+        className = className,
+        sourcePath = sourcePath,
+        sourceEntry = sourceEntry,
+    )
+
 internal fun FieldHit.toView(): FieldHitView =
     FieldHitView(
         className = className,
@@ -279,6 +314,57 @@ internal fun buildFindMethodsUsingStringsRequest(
             query,
         ),
         window = PageWindow(),
+    )
+}
+
+internal fun buildFindClassesUsingStringsRequest(
+    strings: List<String>,
+    requireAll: Boolean,
+): FindClassesUsingStringsRequest {
+    val query = BatchFindClassUsingStrings().apply {
+        val normalized = strings.filter { it.isNotBlank() }
+        if (requireAll) {
+            if (normalized.isNotEmpty()) {
+                groups["all"] = normalized.map { value ->
+                    StringMatcher(value = value, matchType = StringMatchType.Contains)
+                }
+            }
+        } else {
+            normalized.forEachIndexed { index, value ->
+                groups["any-$index"] = listOf(
+                    StringMatcher(value = value, matchType = StringMatchType.Contains),
+                )
+            }
+        }
+    }
+
+    if (query.groups.isEmpty()) {
+        throw IllegalArgumentException("At least one non-blank string filter is required")
+    }
+
+    return FindClassesUsingStringsRequest(
+        queryText = kotlinx.serialization.json.Json.encodeToString(
+            BatchFindClassUsingStrings.serializer(),
+            query,
+        ),
+        window = PageWindow(),
+    )
+}
+
+internal fun applyWindow(items: List<ClassHit>, offset: Int? = null, limit: Int? = null): WindowedClassHits {
+    val normalizedOffset = offset ?: 0
+    require(normalizedOffset >= 0) { "offset must be non-negative" }
+    require(limit == null || limit > 0) { "limit must be positive when specified" }
+    if (normalizedOffset >= items.size) {
+        return WindowedClassHits(
+            total = items.size,
+            items = emptyList(),
+        )
+    }
+    val toIndex = if (limit == null) items.size else minOf(items.size, normalizedOffset + limit)
+    return WindowedClassHits(
+        total = items.size,
+        items = items.subList(normalizedOffset, toIndex),
     )
 }
 
