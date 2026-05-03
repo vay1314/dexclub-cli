@@ -115,6 +115,7 @@ P0 建议至少提供以下 4 组 tool。
 - `list_target_sessions`
 - `get_target_session`
 - `close_target_session`
+- `diagnose_target_sessions`
 
 ### B. 定位
 
@@ -175,6 +176,8 @@ P0 当前已落地的最小口径是：
   - 取得新的 `session_id`
   - 必要时通过 `list_target_sessions / get_target_session / close_target_session`
     管理这些并存 session
+- 长时间未访问的空闲 session 会被自动回收，并一并清理该 session 下的 `method_handle / class_handle`
+- 因此 `session_id`、`method_handle`、`class_handle` 都应被视为运行时上下文，不保证长期稳定有效
 
 ### 2. 对象定位优先级
 
@@ -404,6 +407,35 @@ P0 当前已落地的最小口径是：
 建议输入：
 
 - `session_id`
+
+### `diagnose_target_sessions`
+
+目标：
+
+- 提供当前 MCP 进程内 session/handle 的运行态摘要
+- 降低“空闲自动回收”带来的黑盒感
+
+建议输出：
+
+- `now`
+- `idleTimeoutSeconds`
+- `sessionCount`
+- `methodHandleCount`
+- `classHandleCount`
+- `sessions`
+
+每个 session 至少包含：
+
+- `sessionId`
+- `createdAt`
+- `lastAccessedAt`
+- `expiresAt`
+- `workspace`
+
+说明：
+
+- 这是感知型诊断 tool，不承担管理动作
+- 它用于帮助用户或 skill 理解当前 server 内部状态
 
 ### `method_handle`
 

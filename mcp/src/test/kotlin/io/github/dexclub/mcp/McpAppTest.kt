@@ -62,6 +62,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 internal fun fakeWorkspaceContext(): WorkspaceContext =
@@ -121,7 +123,10 @@ class McpAppTest {
     fun listTargetSessionsReturnsNewestFirst() {
         val timestamps = mutableListOf(
             java.time.Instant.parse("2026-05-03T10:00:00Z"),
+            java.time.Instant.parse("2026-05-03T10:00:00Z"),
             java.time.Instant.parse("2026-05-03T10:00:01Z"),
+            java.time.Instant.parse("2026-05-03T10:00:01Z"),
+            java.time.Instant.parse("2026-05-03T10:00:02Z"),
         )
         val workspaceService = FakeWorkspaceService(fakeWorkspaceContext())
         val app = McpApp(
@@ -160,10 +165,97 @@ class McpAppTest {
 
         val closed = store.closeTargetSession(session.sessionId)
 
-        assertEquals(session, closed)
+        assertNotNull(closed)
+        assertEquals(session.sessionId, closed.sessionId)
+        assertEquals(session.workspace, closed.workspace)
         assertEquals(null, store.getTargetSession(session.sessionId))
         assertEquals(null, store.getMethodHandle(session.sessionId, methodHandle))
         assertEquals(null, store.getClassHandle(session.sessionId, classHandle))
+    }
+
+    @Test
+    fun expiredSessionsArePrunedWithTheirHandles() {
+        val timestamps = mutableListOf(
+            java.time.Instant.parse("2026-05-03T10:00:00Z"),
+            java.time.Instant.parse("2026-05-03T10:00:00Z"),
+            java.time.Instant.parse("2026-05-03T10:31:00Z"),
+            java.time.Instant.parse("2026-05-03T10:31:00Z"),
+        )
+        val store = McpSessionStore(
+            idleTimeout = java.time.Duration.ofMinutes(30),
+            nowProvider = { timestamps.removeAt(0) },
+        )
+        val session = store.openTargetSession(fakeWorkspaceContext())
+        val methodHandle = store.putMethodHandle(
+            sessionId = session.sessionId,
+            descriptor = "Lsample/Test;->foo()V",
+            sourcePath = "sample.apk",
+            sourceEntry = "classes.dex",
+        )
+
+        store.pruneExpiredSessions()
+
+        assertNull(store.getTargetSession(session.sessionId))
+        assertNull(store.getMethodHandle(session.sessionId, methodHandle))
+    }
+
+    @Test
+    fun accessingSessionRefreshesLastAccessedAt() {
+        val timestamps = mutableListOf(
+            java.time.Instant.parse("2026-05-03T10:00:00Z"),
+            java.time.Instant.parse("2026-05-03T10:10:00Z"),
+            java.time.Instant.parse("2026-05-03T10:10:00Z"),
+            java.time.Instant.parse("2026-05-03T10:35:00Z"),
+            java.time.Instant.parse("2026-05-03T10:35:00Z"),
+            java.time.Instant.parse("2026-05-03T10:35:00Z"),
+        )
+        val store = McpSessionStore(
+            idleTimeout = java.time.Duration.ofMinutes(30),
+            nowProvider = { timestamps.removeAt(0) },
+        )
+        val session = store.openTargetSession(fakeWorkspaceContext())
+
+        assertNotNull(store.getTargetSession(session.sessionId))
+
+        store.pruneExpiredSessions()
+
+        assertNotNull(store.getTargetSession(session.sessionId))
+    }
+
+    @Test
+    fun diagnoseTargetSessionsExposesRuntimeSnapshot() {
+        val timestamps = mutableListOf(
+            java.time.Instant.parse("2026-05-03T10:00:00Z"),
+            java.time.Instant.parse("2026-05-03T10:00:00Z"),
+            java.time.Instant.parse("2026-05-03T10:05:00Z"),
+        )
+        val store = McpSessionStore(
+            idleTimeout = java.time.Duration.ofMinutes(30),
+            nowProvider = { timestamps.removeAt(0) },
+        )
+        val session = store.openTargetSession(fakeWorkspaceContext())
+        store.putMethodHandle(
+            sessionId = session.sessionId,
+            descriptor = "Lsample/Test;->foo()V",
+            sourcePath = "sample.apk",
+            sourceEntry = "classes.dex",
+        )
+        store.putClassHandle(
+            sessionId = session.sessionId,
+            descriptor = "Lsample/Test;",
+            sourcePath = "sample.apk",
+            sourceEntry = "classes.dex",
+        )
+
+        val snapshot = store.snapshot().toView()
+
+        assertEquals("2026-05-03T10:05:00Z", snapshot.now)
+        assertEquals(1800L, snapshot.idleTimeoutSeconds)
+        assertEquals(1, snapshot.sessionCount)
+        assertEquals(1, snapshot.methodHandleCount)
+        assertEquals(1, snapshot.classHandleCount)
+        assertEquals("2026-05-03T10:30:00Z", snapshot.sessions.single().expiresAt)
+        assertEquals("2026-05-03T10:00:00Z", snapshot.sessions.single().lastAccessedAt)
     }
 
     @Test

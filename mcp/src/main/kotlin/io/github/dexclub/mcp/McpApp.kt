@@ -163,6 +163,26 @@ internal class McpApp(
         }
 
         server.addTool(
+            name = "diagnose_target_sessions",
+            description = "返回当前 MCP 进程内 target session 与 handle 的运行态摘要，用于降低黑盒感并辅助判断空闲自动回收是否生效。",
+            inputSchema = ToolSchema(
+                properties = buildJsonObject {},
+            ),
+        ) {
+            val snapshot = diagnoseTargetSessions()
+            CallToolResult(
+                content = listOf(
+                    TextContent(
+                        json.encodeToString(
+                            DiagnoseTargetSessionsResult.serializer(),
+                            snapshot.toView(),
+                        ),
+                    ),
+                ),
+            )
+        }
+
+        server.addTool(
             name = "inspect_method",
             description = "基于已打开的 target session 检查方法的一层事实视图。优先传 method_handle；include 仅支持 using-fields、callers、invokes、strings、annotations；brief=true 时只返回计数摘要。",
             inputSchema = ToolSchema(
@@ -935,6 +955,8 @@ internal class McpApp(
     internal fun getTargetSession(sessionId: String): TargetSession? = sessionStore.getTargetSession(sessionId)
 
     internal fun closeTargetSession(sessionId: String): TargetSession? = sessionStore.closeTargetSession(sessionId)
+
+    internal fun diagnoseTargetSessions(): SessionStoreSnapshot = sessionStore.snapshot()
 
     internal fun getResourceValue(
         workspace: WorkspaceContext,

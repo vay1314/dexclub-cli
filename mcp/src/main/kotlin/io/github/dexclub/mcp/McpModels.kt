@@ -39,6 +39,7 @@ import io.github.dexclub.dexkit.query.FindMethod
 import io.github.dexclub.dexkit.query.MethodMatcher
 import io.github.dexclub.dexkit.query.StringMatchType
 import io.github.dexclub.dexkit.query.StringMatcher
+import java.time.Duration
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -69,6 +70,25 @@ internal data class ListTargetSessionsResult(
 internal data class CloseTargetSessionResult(
     val closed: Boolean,
     val session: TargetSessionView? = null,
+)
+
+@Serializable
+internal data class DiagnoseTargetSessionsResult(
+    val now: String,
+    val idleTimeoutSeconds: Long? = null,
+    val sessionCount: Int,
+    val methodHandleCount: Int,
+    val classHandleCount: Int,
+    val sessions: List<TargetSessionDiagnosticsView>,
+)
+
+@Serializable
+internal data class TargetSessionDiagnosticsView(
+    val sessionId: String,
+    val createdAt: String,
+    val lastAccessedAt: String,
+    val expiresAt: String? = null,
+    val workspace: WorkspaceContextView,
 )
 
 @Serializable
@@ -478,6 +498,25 @@ internal fun TargetSession.toView(): TargetSessionView =
     TargetSessionView(
         sessionId = sessionId,
         createdAt = createdAt,
+        workspace = workspace.toView(),
+    )
+
+internal fun SessionStoreSnapshot.toView(): DiagnoseTargetSessionsResult =
+    DiagnoseTargetSessionsResult(
+        now = now.toString(),
+        idleTimeoutSeconds = idleTimeout?.seconds,
+        sessionCount = sessionCount,
+        methodHandleCount = methodHandleCount,
+        classHandleCount = classHandleCount,
+        sessions = sessions.map { it.toDiagnosticsView(idleTimeout) },
+    )
+
+private fun TargetSession.toDiagnosticsView(idleTimeout: Duration?): TargetSessionDiagnosticsView =
+    TargetSessionDiagnosticsView(
+        sessionId = sessionId,
+        createdAt = createdAt,
+        lastAccessedAt = lastAccessedAt.toString(),
+        expiresAt = idleTimeout?.let { lastAccessedAt.plus(it).toString() },
         workspace = workspace.toView(),
     )
 
