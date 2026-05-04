@@ -35,6 +35,15 @@ jobs:
             msys2_msystem: ""
             msys2_install: ""
             msys2_bin_subdir: ""
+          - target: android-arm64
+            runner: ubuntu-24.04
+            os_name: android
+            arch: arm64
+            native_file_name: libdexkit.so
+            gradle_command: ./gradlew
+            msys2_msystem: ""
+            msys2_install: ""
+            msys2_bin_subdir: ""
           - target: windows-x64
             runner: windows-2022
             os_name: windows
