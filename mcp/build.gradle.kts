@@ -10,6 +10,11 @@ kotlin {
 
 application {
     mainClass = "io.github.dexclub.mcp.MainKt"
+    applicationDefaultJvmArgs = listOf(
+        "-XX:ErrorFile=hs_err_pid%p.log",
+        "-XX:+HeapDumpOnOutOfMemoryError",
+        "-XX:HeapDumpPath=.",
+    )
 }
 
 dependencies {

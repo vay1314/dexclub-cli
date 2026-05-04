@@ -25,7 +25,9 @@ import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -65,7 +67,7 @@ internal class McpApp(
             ),
         )
 
-        server.addTool(
+        server.addLoggedTool(
             name = "open_target_session",
             description = "初始化目标输入并创建可复用的 DexClub target session。",
             inputSchema = ToolSchema(
@@ -77,7 +79,7 @@ internal class McpApp(
         ) { request ->
             val input = request.arguments?.get("input")?.jsonPrimitive?.content?.trim().orEmpty()
             if (input.isEmpty()) {
-                return@addTool CallToolResult(
+                return@addLoggedTool CallToolResult(
                     content = listOf(TextContent("""{"error":"input is required"}""")),
                     isError = true,
                 )
@@ -91,7 +93,7 @@ internal class McpApp(
             )
         }
 
-        server.addTool(
+        server.addLoggedTool(
             name = "list_target_sessions",
             description = "列出当前 MCP 进程中已打开的 target session，用于在同一 server 内切换不同工作区或目标。",
             inputSchema = ToolSchema(
@@ -114,17 +116,17 @@ internal class McpApp(
             )
         }
 
-        server.addTool(
+        server.addLoggedTool(
             name = "get_target_session",
             description = "读取单个 target session 的当前绑定工作区与 active target 信息。",
             inputSchema = sessionIdOnlySchema,
         ) { request ->
             val sessionId = request.requiredStringArgument("session_id")
             if (sessionId.isEmpty()) {
-                return@addTool errorResult("session_id is required")
+                return@addLoggedTool errorResult("session_id is required")
             }
             val session = getTargetSession(sessionId)
-                ?: return@addTool errorResult("session_id not found")
+                ?: return@addLoggedTool errorResult("session_id not found")
             CallToolResult(
                 content = listOf(
                     TextContent(
@@ -137,14 +139,14 @@ internal class McpApp(
             )
         }
 
-        server.addTool(
+        server.addLoggedTool(
             name = "close_target_session",
             description = "关闭一个 target session，并清理该 session 下的 method_handle / class_handle。",
             inputSchema = sessionIdOnlySchema,
         ) { request ->
             val sessionId = request.requiredStringArgument("session_id")
             if (sessionId.isEmpty()) {
-                return@addTool errorResult("session_id is required")
+                return@addLoggedTool errorResult("session_id is required")
             }
             val session = closeTargetSession(sessionId)
             CallToolResult(
@@ -162,7 +164,7 @@ internal class McpApp(
             )
         }
 
-        server.addTool(
+        server.addLoggedTool(
             name = "diagnose_target_sessions",
             description = "返回当前 MCP 进程内 target session 与 handle 的运行态摘要，用于降低黑盒感并辅助判断空闲自动回收是否生效。",
             inputSchema = ToolSchema(
@@ -182,7 +184,7 @@ internal class McpApp(
             )
         }
 
-        server.addTool(
+        server.addLoggedTool(
             name = "inspect_method",
             description = "基于已打开的 target session 检查方法的一层事实视图。优先传 method_handle；include 仅支持 using-fields、callers、invokes、strings、annotations；brief=true 时只返回计数摘要。",
             inputSchema = ToolSchema(
@@ -202,16 +204,16 @@ internal class McpApp(
                 },
             ),
         ) { request ->
-            val context = resolveExecutionContext(request) ?: return@addTool missingSessionOrWorkdirResult()
+            val context = resolveExecutionContext(request) ?: return@addLoggedTool missingSessionOrWorkdirResult()
             val session = context.session
             val methodRef = try {
                 resolveMethodReference(request, session)
             } catch (cause: IllegalArgumentException) {
-                return@addTool errorResult(cause.message.orEmpty())
+                return@addLoggedTool errorResult(cause.message.orEmpty())
             }
             val descriptor = methodRef?.descriptor.orEmpty()
             if (descriptor.isEmpty()) {
-                return@addTool errorResult("method_handle or descriptor is required")
+                return@addLoggedTool errorResult("method_handle or descriptor is required")
             }
 
             val includes = try {
@@ -221,7 +223,7 @@ internal class McpApp(
                         ?.map { it.jsonPrimitive.content },
                 )
             } catch (cause: IllegalArgumentException) {
-                return@addTool CallToolResult(
+                return@addLoggedTool CallToolResult(
                     content = listOf(TextContent("""{"error":"${cause.message}"}""")),
                     isError = true,
                 )
@@ -245,7 +247,7 @@ internal class McpApp(
             )
         }
 
-        server.addTool(
+        server.addLoggedTool(
             name = "manifest",
             description = "返回当前 target 的结构化 manifest 视图。默认先只取结构化字段；仅在确实需要原始证据时才传 include_text=true。",
             inputSchema = ToolSchema(
@@ -263,7 +265,7 @@ internal class McpApp(
                 },
             ),
         ) { request ->
-            val context = resolveExecutionContext(request) ?: return@addTool missingSessionOrWorkdirResult()
+            val context = resolveExecutionContext(request) ?: return@addLoggedTool missingSessionOrWorkdirResult()
             val includes = try {
                 parseManifestInspectionSections(
                     (request.arguments?.get("include") as? JsonArray)
@@ -271,7 +273,7 @@ internal class McpApp(
                         ?.map { it.jsonPrimitive.content },
                 )
             } catch (cause: IllegalArgumentException) {
-                return@addTool CallToolResult(
+                return@addLoggedTool CallToolResult(
                     content = listOf(TextContent("""{"error":"${cause.message}"}""")),
                     isError = true,
                 )
@@ -290,7 +292,7 @@ internal class McpApp(
             )
         }
 
-        server.addTool(
+        server.addLoggedTool(
             name = "export_method_java",
             description = "导出单方法的 Java 语义视图。优先传 method_handle；通常应先用 find/inspect 缩小候选，再导出少量方法文本。",
             inputSchema = ToolSchema(
@@ -311,7 +313,7 @@ internal class McpApp(
             )
         }
 
-        server.addTool(
+        server.addLoggedTool(
             name = "export_method_smali",
             description = "导出单方法的 smali 原始证据视图。优先传 method_handle；通常应先用 find/inspect 缩小候选，再导出少量方法文本。",
             inputSchema = ToolSchema(
@@ -333,7 +335,7 @@ internal class McpApp(
             )
         }
 
-        server.addTool(
+        server.addLoggedTool(
             name = "export_class_java",
             description = "导出整类的 Java 语义视图。优先传 class_handle；通常应先确认类候选，再导出整类文本。",
             inputSchema = ToolSchema(
@@ -354,7 +356,7 @@ internal class McpApp(
             )
         }
 
-        server.addTool(
+        server.addLoggedTool(
             name = "export_class_smali",
             description = "导出整类的 smali 原始证据视图。优先传 class_handle；通常应先确认类候选，再导出整类文本。",
             inputSchema = ToolSchema(
@@ -375,7 +377,7 @@ internal class McpApp(
             )
         }
 
-        server.addTool(
+        server.addLoggedTool(
             name = "find_methods",
             description = "按类名、方法名或 descriptor 片段定位方法候选。建议配合 brief=true 和 fields 收窄返回，再继续 inspect 或 export。",
             inputSchema = ToolSchema(
@@ -398,7 +400,7 @@ internal class McpApp(
                 },
             ),
         ) { request ->
-            val context = resolveExecutionContext(request) ?: return@addTool missingSessionOrWorkdirResult()
+            val context = resolveExecutionContext(request) ?: return@addLoggedTool missingSessionOrWorkdirResult()
             val classNameContains = request.optionalStringArgument("class_name_contains")
             val methodNameContains = request.optionalStringArgument("method_name_contains")
             val descriptorContains = request.optionalStringArgument("descriptor_contains")
@@ -411,7 +413,7 @@ internal class McpApp(
                     supported = if (context.session != null) methodFieldNamesWithHandle else methodFieldNames,
                 )
             } catch (cause: IllegalArgumentException) {
-                return@addTool errorResult(cause.message.orEmpty())
+                return@addLoggedTool errorResult(cause.message.orEmpty())
             }
             val hits = try {
                 findMethods(
@@ -423,7 +425,7 @@ internal class McpApp(
                     limit = limit,
                 )
             } catch (cause: IllegalArgumentException) {
-                return@addTool errorResult(cause.message.orEmpty())
+                return@addLoggedTool errorResult(cause.message.orEmpty())
             }
             CallToolResult(
                 content = listOf(
@@ -446,7 +448,7 @@ internal class McpApp(
             )
         }
 
-        server.addTool(
+        server.addLoggedTool(
             name = "find_classes_using_strings",
             description = "使用字符串锚点定位类候选。建议优先用 brief=true 和 fields 收窄候选，再继续 export_class_* 或 find_methods。",
             inputSchema = ToolSchema(
@@ -483,7 +485,7 @@ internal class McpApp(
             findClassesUsingStringsTool(request)
         }
 
-        server.addTool(
+        server.addLoggedTool(
             name = "find_methods_using_strings",
             description = "使用字符串锚点定位方法候选。建议优先用 brief=true 和 fields 收窄候选，再继续 inspect_method 或 export_method_*。",
             inputSchema = ToolSchema(
@@ -520,7 +522,7 @@ internal class McpApp(
             findMethodsUsingStringsTool(request)
         }
 
-        server.addTool(
+        server.addLoggedTool(
             name = "list_res",
             description = "列出当前 target 可见的资源条目索引。建议优先用 brief=true 和 fields 收窄结果。",
             inputSchema = ToolSchema(
@@ -541,7 +543,7 @@ internal class McpApp(
                 },
             ),
         ) { request ->
-            val context = resolveExecutionContext(request) ?: return@addTool missingSessionOrWorkdirResult()
+            val context = resolveExecutionContext(request) ?: return@addLoggedTool missingSessionOrWorkdirResult()
             val type = request.optionalStringArgument("type")
             val offset = request.intArgument("offset")
             val limit = request.intArgument("limit")
@@ -552,7 +554,7 @@ internal class McpApp(
                     supported = resourceEntryFieldNames,
                 )
             } catch (cause: IllegalArgumentException) {
-                return@addTool errorResult(cause.message.orEmpty())
+                return@addLoggedTool errorResult(cause.message.orEmpty())
             }
             val entries = try {
                 listResources(
@@ -562,7 +564,7 @@ internal class McpApp(
                     limit = limit,
                 )
             } catch (cause: IllegalArgumentException) {
-                return@addTool errorResult(cause.message.orEmpty())
+                return@addLoggedTool errorResult(cause.message.orEmpty())
             }
             CallToolResult(
                 content = listOf(
@@ -576,7 +578,7 @@ internal class McpApp(
             )
         }
 
-        server.addTool(
+        server.addLoggedTool(
             name = "find_resource_values",
             description = "按资源值搜索资源候选，仅支持 string/integer/bool/color。建议优先用 brief=true 和 fields 收窄结果，再用 get_resource_value 精确确认。",
             inputSchema = ToolSchema(
@@ -601,11 +603,11 @@ internal class McpApp(
                 required = listOf("session_id", "type", "value"),
             ),
         ) { request ->
-            val context = resolveExecutionContext(request) ?: return@addTool missingSessionOrWorkdirResult()
+            val context = resolveExecutionContext(request) ?: return@addLoggedTool missingSessionOrWorkdirResult()
             val type = request.requiredStringArgument("type")
             val value = request.requiredStringArgument("value")
             if (type.isEmpty() || value.isEmpty()) {
-                return@addTool errorResult("type and value are required")
+                return@addLoggedTool errorResult("type and value are required")
             }
             val contains = request.booleanArgument("contains") ?: false
             val ignoreCase = request.booleanArgument("ignore_case") ?: false
@@ -618,7 +620,7 @@ internal class McpApp(
                     supported = resourceValueFieldNames,
                 )
             } catch (cause: IllegalArgumentException) {
-                return@addTool errorResult(cause.message.orEmpty())
+                return@addLoggedTool errorResult(cause.message.orEmpty())
             }
             val hits = try {
                 findResourceValues(
@@ -631,7 +633,7 @@ internal class McpApp(
                     limit = limit,
                 )
             } catch (cause: IllegalArgumentException) {
-                return@addTool errorResult(cause.message.orEmpty())
+                return@addLoggedTool errorResult(cause.message.orEmpty())
             }
             CallToolResult(
                 content = listOf(
@@ -645,7 +647,7 @@ internal class McpApp(
             )
         }
 
-        server.addTool(
+        server.addLoggedTool(
             name = "get_resource_value",
             description = "将资源 id 或 type/name 解析为结构化资源值。",
             inputSchema = ToolSchema(
@@ -658,12 +660,12 @@ internal class McpApp(
                 },
             ),
         ) { request ->
-            val context = resolveExecutionContext(request) ?: return@addTool missingSessionOrWorkdirResult()
+            val context = resolveExecutionContext(request) ?: return@addLoggedTool missingSessionOrWorkdirResult()
             val resourceId = request.optionalStringArgument("resource_id")
             val type = request.optionalStringArgument("type")
             val name = request.optionalStringArgument("name")
             if (resourceId == null && (type == null || name == null)) {
-                return@addTool errorResult("resource_id or type+name is required")
+                return@addLoggedTool errorResult("resource_id or type+name is required")
             }
             val resource = getResourceValue(
                 workspace = context.workspace,
@@ -684,6 +686,64 @@ internal class McpApp(
         }
 
         return server
+    }
+
+    private fun Server.addLoggedTool(
+        name: String,
+        description: String,
+        inputSchema: ToolSchema,
+        handler: suspend (CallToolRequest) -> CallToolResult,
+    ) {
+        addTool(
+            name = name,
+            description = description,
+            inputSchema = inputSchema,
+        ) { request ->
+            val summary = summarizeToolArguments(request.arguments)
+            McpRuntimeDiagnostics.toolStarted(name, summary)
+            try {
+                handler(request).also { result ->
+                    McpRuntimeDiagnostics.toolFinished(name, result.isError == true)
+                }
+            } catch (cause: Throwable) {
+                McpRuntimeDiagnostics.toolFailed(name, cause)
+                throw cause
+            }
+        }
+    }
+
+    private fun summarizeToolArguments(arguments: JsonObject?): String {
+        if (arguments == null || arguments.isEmpty()) return ""
+        val parts = mutableListOf<String>()
+        val keys = arguments.keys.sorted()
+        parts += "keys=${keys.joinToString(prefix = "[", postfix = "]")}"
+        appendToolSummary(parts, arguments, "session_id")
+        appendToolSummary(parts, arguments, "workdir")
+        appendToolSummary(parts, arguments, "descriptor")
+        appendToolSummary(parts, arguments, "method_handle")
+        appendToolSummary(parts, arguments, "class_handle")
+        appendToolSummary(parts, arguments, "class_name_contains")
+        appendToolSummary(parts, arguments, "method_name_contains")
+        appendToolSummary(parts, arguments, "descriptor_contains")
+        appendToolSummary(parts, arguments, "type")
+        appendToolSummary(parts, arguments, "name")
+        appendToolSummary(parts, arguments, "resource_id")
+        appendToolSummary(parts, arguments, "value")
+        appendArraySummary(parts, arguments, "contains_any_strings")
+        appendArraySummary(parts, arguments, "contains_all_strings")
+        appendArraySummary(parts, arguments, "include")
+        appendArraySummary(parts, arguments, "fields")
+        return parts.joinToString(separator = " ")
+    }
+
+    private fun appendToolSummary(parts: MutableList<String>, arguments: JsonObject, key: String) {
+        val value = arguments[key]?.jsonPrimitive?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() } ?: return
+        parts += "$key=${value.take(120)}"
+    }
+
+    private fun appendArraySummary(parts: MutableList<String>, arguments: JsonObject, key: String) {
+        val array = arguments[key] as? JsonArray ?: return
+        parts += "$key#=${array.size}"
     }
 
     fun close() {

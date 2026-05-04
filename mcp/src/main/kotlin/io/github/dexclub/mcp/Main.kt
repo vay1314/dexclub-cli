@@ -12,18 +12,28 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.doublereceive.DoubleReceive
-import io.ktor.server.request.receiveText
 import io.ktor.server.request.ApplicationRequest
 import io.ktor.server.request.httpMethod
+import io.ktor.server.request.receiveText
 import io.ktor.server.request.uri
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
+import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.StreamableHttpServerTransport
 import io.modelcontextprotocol.kotlin.sdk.types.McpJson
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.concurrent.atomic.AtomicReference
+import kotlin.io.path.createDirectories
 
 fun main() {
     configureSlf4jSimpleDefaults()
@@ -31,59 +41,41 @@ fun main() {
     DexKitMcpBootstrap.configureNativeLibraryDir()
 
     val config = loadHttpServerConfig()
+    McpRuntimeDiagnostics.install(config)
     val app = McpApp()
     val server = app.createServer()
 
     System.err.println(
         "DexClub MCP listening on http://${config.host}:${config.port}${config.path} " +
-            "(stateless streamable HTTP, debug=${config.debugHttp})",
+            "(stateless streamable HTTP, trace=${config.traceEnabled})",
     )
 
-    createHttpServer(config, app, server)
+    createHttpServer(config, server)
         .start(wait = true)
 }
-
-internal fun createHttpServer(
-    config: HttpServerConfig,
-    app: McpApp,
-    server: io.modelcontextprotocol.kotlin.sdk.server.Server = app.createServer(),
-): EmbeddedServer<*, *> =
-    embeddedServer(Netty, host = config.host, port = config.port) {
-        if (config.debugHttp) {
-            install(DoubleReceive)
-            installHttpDebugLogging()
-        }
-        install(ContentNegotiation) {
-            json(McpJson)
-        }
-        routing {
-            post(config.path) {
-                val transport = StreamableHttpServerTransport(
-                    StreamableHttpServerTransport.Configuration(enableJsonResponse = true),
-                ).also { it.setSessionIdGenerator(null) }
-                server.createSession(transport)
-                transport.handlePostRequest(session = null, call = CompatibleAcceptingCall(call))
-            }
-        }
-    }
 
 internal data class HttpServerConfig(
     val host: String,
     val port: Int,
     val path: String,
-    val debugHttp: Boolean,
+    val traceEnabled: Boolean,
+    val traceLogFile: Path?,
 )
 
-private fun loadHttpServerConfig(): HttpServerConfig =
-    HttpServerConfig(
+private fun loadHttpServerConfig(): HttpServerConfig {
+    val traceEnabled = System.getenv("DEXCLUB_MCP_TRACE")
+        ?.trim()
+        ?.equals("false", ignoreCase = true)
+        ?.not()
+        ?: true
+    return HttpServerConfig(
         host = System.getenv("DEXCLUB_MCP_HOST")?.trim()?.ifEmpty { null } ?: "127.0.0.1",
         port = System.getenv("DEXCLUB_MCP_PORT")?.trim()?.toIntOrNull() ?: 8787,
         path = normalizePath(System.getenv("DEXCLUB_MCP_PATH")),
-        debugHttp = System.getenv("DEXCLUB_MCP_DEBUG")
-            ?.trim()
-            ?.equals("true", ignoreCase = true)
-            ?: false,
+        traceEnabled = traceEnabled,
+        traceLogFile = if (traceEnabled) Paths.get("logs", "mcp.log") else null,
     )
+}
 
 private fun normalizePath(rawPath: String?): String {
     val path = rawPath?.trim()?.ifEmpty { null } ?: "/mcp"
@@ -103,16 +95,42 @@ private fun disableKotlinLoggingStartupMessage() {
     }
 }
 
-private fun Application.installHttpDebugLogging() {
+internal fun createHttpServer(
+    config: HttpServerConfig,
+    server: Server,
+): EmbeddedServer<*, *> =
+    embeddedServer(Netty, host = config.host, port = config.port) {
+        if (config.traceEnabled) {
+            install(DoubleReceive)
+            installHttpTraceLogging()
+        }
+        install(ContentNegotiation) {
+            json(McpJson)
+        }
+        routing {
+            post(config.path) {
+                val transport = StreamableHttpServerTransport(
+                    StreamableHttpServerTransport.Configuration(enableJsonResponse = true),
+                ).also { it.setSessionIdGenerator(null) }
+                server.createSession(transport)
+                transport.handlePostRequest(session = null, call = CompatibleAcceptingCall(call))
+            }
+        }
+    }
+
+private fun Application.installHttpTraceLogging() {
     intercept(ApplicationCallPipeline.Monitoring) {
         val request = context.request
         val startedAt = System.nanoTime()
-        val debugInfo = readDebugRequestInfo(context)
-        System.err.println(
-            "HTTP MCP request: method=${request.httpMethod.value} uri=${request.uri} " +
-                "${debugInfo.toLogFields()}" +
-                "accept=${request.headers[HttpHeaders.Accept] ?: ""} contentType=${request.headers[HttpHeaders.ContentType] ?: ""} " +
-                "protocol=${request.headers["Mcp-Protocol-Version"] ?: ""} session=${request.headers["Mcp-Session-Id"] ?: ""}",
+        val info = readTraceRequestInfo(context)
+        McpRuntimeDiagnostics.httpRequest(
+            requestMethod = request.httpMethod.value,
+            uri = request.uri,
+            info = info,
+            accept = request.headers[HttpHeaders.Accept],
+            contentType = request.headers[HttpHeaders.ContentType],
+            protocol = request.headers["Mcp-Protocol-Version"],
+            session = request.headers["Mcp-Session-Id"],
         )
         var failure: Throwable? = null
         try {
@@ -123,25 +141,29 @@ private fun Application.installHttpDebugLogging() {
         } finally {
             val elapsedMs = (System.nanoTime() - startedAt) / 1_000_000
             if (failure == null) {
-                System.err.println(
-                    "HTTP MCP response: method=${request.httpMethod.value} uri=${request.uri} " +
-                        "${debugInfo.toLogFields()}" +
-                        "status=${context.response.status()?.value ?: 200} elapsedMs=$elapsedMs",
+                McpRuntimeDiagnostics.httpResponse(
+                    requestMethod = request.httpMethod.value,
+                    uri = request.uri,
+                    info = info,
+                    status = context.response.status()?.value ?: 200,
+                    elapsedMs = elapsedMs,
                 )
             } else {
-                System.err.println(
-                    "HTTP MCP failure: method=${request.httpMethod.value} uri=${request.uri} " +
-                        "${debugInfo.toLogFields()}" +
-                        "error=${failure::class.qualifiedName}: ${failure.message.orEmpty()} elapsedMs=$elapsedMs",
+                McpRuntimeDiagnostics.httpFailure(
+                    requestMethod = request.httpMethod.value,
+                    uri = request.uri,
+                    info = info,
+                    cause = failure,
+                    elapsedMs = elapsedMs,
                 )
             }
         }
     }
 }
 
-private suspend fun readDebugRequestInfo(call: ApplicationCall): DebugRequestInfo {
-    val body = runCatching { call.receiveText() }.getOrNull()?.takeIf { it.isNotBlank() } ?: return DebugRequestInfo()
-    val root = runCatching { Json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return DebugRequestInfo()
+private suspend fun readTraceRequestInfo(call: ApplicationCall): TraceRequestInfo {
+    val body = runCatching { call.receiveText() }.getOrNull()?.takeIf { it.isNotBlank() } ?: return TraceRequestInfo()
+    val root = runCatching { Json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return TraceRequestInfo()
     val requestId = root["id"]?.jsonPrimitive?.contentOrNull
     val rpcMethod = root["method"]?.jsonPrimitive?.contentOrNull
     val toolName = root["params"]
@@ -150,10 +172,10 @@ private suspend fun readDebugRequestInfo(call: ApplicationCall): DebugRequestInf
         ?.jsonPrimitive
         ?.contentOrNull
         ?.takeIf { rpcMethod == "tools/call" }
-    return DebugRequestInfo(requestId = requestId, rpcMethod = rpcMethod, toolName = toolName)
+    return TraceRequestInfo(requestId = requestId, rpcMethod = rpcMethod, toolName = toolName)
 }
 
-private data class DebugRequestInfo(
+internal data class TraceRequestInfo(
     val requestId: String? = null,
     val rpcMethod: String? = null,
     val toolName: String? = null,
@@ -163,6 +185,193 @@ private data class DebugRequestInfo(
         rpcMethod?.let { append("rpcMethod=$it ") }
         toolName?.let { append("tool=$it ") }
     }
+}
+
+private class RollingTraceLogger(
+    private val logFile: Path,
+    private val maxFileSizeBytes: Long,
+    private val maxHistoryFiles: Int,
+) {
+    private val lock = Any()
+
+    fun append(event: String) {
+        synchronized(lock) {
+            val normalizedEvent = ensureTrailingLineBreak(event)
+            val parent = logFile.parent
+            if (parent != null) {
+                parent.createDirectories()
+            }
+            Files.writeString(
+                logFile,
+                normalizedEvent,
+                StandardCharsets.UTF_8,
+                java.nio.file.StandardOpenOption.CREATE,
+                java.nio.file.StandardOpenOption.APPEND,
+            )
+            rotateIfNeeded()
+        }
+    }
+
+    private fun rotateIfNeeded() {
+        if (!Files.exists(logFile)) return
+        if (Files.size(logFile) <= maxFileSizeBytes) return
+
+        val oldest = rotatedFile(maxHistoryFiles)
+        Files.deleteIfExists(oldest)
+        for (index in maxHistoryFiles - 1 downTo 1) {
+            val source = rotatedFile(index)
+            if (Files.exists(source)) {
+                Files.move(source, rotatedFile(index + 1))
+            }
+        }
+        Files.move(logFile, rotatedFile(1))
+    }
+
+    private fun rotatedFile(index: Int): Path =
+        logFile.resolveSibling("${logFile.fileName}.$index")
+
+    private fun ensureTrailingLineBreak(event: String): String =
+        if (event.endsWith(System.lineSeparator())) event else event + System.lineSeparator()
+}
+
+internal object McpRuntimeDiagnostics {
+    private val currentOperation = AtomicReference<String?>(null)
+    private val traceLogger = AtomicReference<RollingTraceLogger?>(null)
+    private val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")
+        .withZone(ZoneId.systemDefault())
+
+    fun install(config: HttpServerConfig) {
+        traceLogger.set(
+            config.traceLogFile?.let {
+                RollingTraceLogger(
+                    logFile = it,
+                    maxFileSizeBytes = 10L * 1024 * 1024,
+                    maxHistoryFiles = 5,
+                )
+            },
+        )
+
+        val pid = runCatching { ProcessHandle.current().pid() }.getOrNull()
+        val startup = buildString {
+            append("DexClub MCP process started")
+            pid?.let { append(" pid=$it") }
+            append(" crashFiles=./hs_err_pid%p.log heapDumpPath=./")
+            config.traceLogFile?.let {
+                append(" traceFile=${it.toDisplayPath()}")
+            }
+        }
+        System.err.println(startup)
+        trace("PROCESS START: $startup")
+
+        Thread.setDefaultUncaughtExceptionHandler { thread, error ->
+            val message =
+                "DexClub MCP uncaught exception: thread=${thread.name} " +
+                    "currentOperation=${currentOperation.get().orEmpty()} " +
+                    "error=${error::class.qualifiedName}: ${error.message.orEmpty()}"
+            System.err.println(message)
+            error.printStackTrace(System.err)
+            traceStack("UNCAUGHT EXCEPTION: $message", error)
+        }
+        Runtime.getRuntime().addShutdownHook(
+            Thread {
+                val message = "DexClub MCP shutdown: currentOperation=${currentOperation.get().orEmpty()}"
+                System.err.println(message)
+                trace("SHUTDOWN: $message")
+            },
+        )
+    }
+
+    fun toolStarted(toolName: String, summary: String) {
+        currentOperation.set("$toolName $summary".trim())
+        trace("MCP tool begin: tool=$toolName ${summary.trim()}".trim())
+    }
+
+    fun toolFinished(toolName: String, isError: Boolean) {
+        trace("MCP tool end: tool=$toolName isError=$isError")
+        currentOperation.set(null)
+    }
+
+    fun toolFailed(toolName: String, cause: Throwable) {
+        val message =
+            "MCP tool failure: tool=$toolName " +
+                "error=${cause::class.qualifiedName}: ${cause.message.orEmpty()}"
+        System.err.println(message)
+        cause.printStackTrace(System.err)
+        traceStack(message, cause)
+        currentOperation.set(null)
+    }
+
+    fun httpRequest(
+        requestMethod: String,
+        uri: String,
+        info: TraceRequestInfo,
+        accept: String?,
+        contentType: String?,
+        protocol: String?,
+        session: String?,
+    ) {
+        trace(
+            "HTTP MCP request: method=$requestMethod uri=$uri ${info.toLogFields()}" +
+                "accept=${accept.orEmpty()} contentType=${contentType.orEmpty()} " +
+                "protocol=${protocol.orEmpty()} session=${session.orEmpty()}",
+        )
+    }
+
+    fun httpResponse(
+        requestMethod: String,
+        uri: String,
+        info: TraceRequestInfo,
+        status: Int,
+        elapsedMs: Long,
+    ) {
+        trace(
+            "HTTP MCP response: method=$requestMethod uri=$uri ${info.toLogFields()}" +
+                "status=$status elapsedMs=$elapsedMs",
+        )
+    }
+
+    fun httpFailure(
+        requestMethod: String,
+        uri: String,
+        info: TraceRequestInfo,
+        cause: Throwable,
+        elapsedMs: Long,
+    ) {
+        traceStack(
+            "HTTP MCP failure: method=$requestMethod uri=$uri ${info.toLogFields()}" +
+                "error=${cause::class.qualifiedName}: ${cause.message.orEmpty()} elapsedMs=$elapsedMs",
+            cause,
+        )
+    }
+
+    private fun trace(message: String) {
+        val logger = traceLogger.get() ?: return
+        logger.append("${timestamp()} $message")
+    }
+
+    private fun traceStack(message: String, cause: Throwable) {
+        val logger = traceLogger.get() ?: return
+        val payload = buildString {
+            append(timestamp())
+            append(' ')
+            append(message)
+            appendLine()
+            append(cause.stackTraceToString())
+        }
+        logger.append(payload)
+    }
+
+    private fun timestamp(): String = formatter.format(Instant.now())
+}
+
+private fun Path.toDisplayPath(): String {
+    val normalized = toAbsolutePath().normalize()
+    val cwd = Paths.get("").toAbsolutePath().normalize()
+    return normalized
+        .takeIf { it.startsWith(cwd) }
+        ?.let { cwd.relativize(it).toString().replace('\\', '/') }
+        ?.let { "./$it" }
+        ?: normalized.toString()
 }
 
 private class CompatibleAcceptingCall(

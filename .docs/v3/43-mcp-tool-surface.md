@@ -101,11 +101,13 @@ skill 再基于这些对象形成结论。
 - `DEXCLUB_MCP_HOST`
 - `DEXCLUB_MCP_PORT`
 - `DEXCLUB_MCP_PATH`
-- `DEXCLUB_MCP_DEBUG`
+- `DEXCLUB_MCP_TRACE`
 
 其中：
 
-- `DEXCLUB_MCP_DEBUG=true` 时，会把 HTTP MCP 的请求/响应摘要打印到 `stderr`
+- 终端默认保留最小运行日志
+- 详细 HTTP / tool 轨迹默认写入 `logs/mcp.log`
+- `DEXCLUB_MCP_TRACE=false` 时，可显式关闭详细轨迹文件
 - 启动日志会明确打印最终监听的 `host:port/path`
 
 这样可以避免将 transport 层 session 与 DexClub 自身 session 语义混在一起。

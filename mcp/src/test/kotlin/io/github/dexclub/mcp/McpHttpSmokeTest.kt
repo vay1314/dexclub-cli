@@ -37,15 +37,15 @@ class McpHttpSmokeTest {
 
     @Test
     fun httpServerSupportsInitializeToolsListAndOpenTargetSession() = runBlocking {
-        smoke(debugHttp = false)
+        smoke(traceEnabled = false)
     }
 
     @Test
-    fun httpServerSupportsInitializeToolsListAndOpenTargetSessionWithDebugEnabled() = runBlocking {
-        smoke(debugHttp = true)
+    fun httpServerSupportsInitializeToolsListAndOpenTargetSessionWithTraceEnabled() = runBlocking {
+        smoke(traceEnabled = true)
     }
 
-    private suspend fun smoke(debugHttp: Boolean) {
+    private suspend fun smoke(traceEnabled: Boolean) {
         val app = McpApp(
             services = Services(
                 workspace = FakeWorkspaceService(fakeWorkspaceContext()),
@@ -61,9 +61,9 @@ class McpHttpSmokeTest {
                 host = "127.0.0.1",
                 port = port,
                 path = "/mcp",
-                debugHttp = debugHttp,
+                traceEnabled = traceEnabled,
+                traceLogFile = if (traceEnabled) kotlin.io.path.createTempDirectory("mcp-trace-test").resolve("mcp.log") else null,
             ),
-            app = app,
             server = server,
         ).also { it.start(wait = false) }
 

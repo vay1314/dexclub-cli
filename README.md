@@ -187,12 +187,13 @@ $env:DEXCLUB_MCP_PORT="8787"
 - `DEXCLUB_MCP_HOST`
 - `DEXCLUB_MCP_PORT`
 - `DEXCLUB_MCP_PATH`
-- `DEXCLUB_MCP_DEBUG`
+- `DEXCLUB_MCP_TRACE`
 
 说明：
 
 - `mcp` 是面向 Codex / agent 的工具服务，不是交互式 CLI
-- 正常启动后通常不会持续输出内容；仅在 `DEXCLUB_MCP_DEBUG=true` 时打印 HTTP 请求/响应调试日志
+- 终端默认保留最小运行日志（启动、tool failure、未捕获异常、shutdown）
+- 详细轨迹默认写入 `logs/mcp.log`，并按大小轮转；可通过 `DEXCLUB_MCP_TRACE=false` 显式关闭
 - `mcp` 默认依赖 DexKit native 动态库位于分发目录的 `lib/` 下
 
 ## Skills
