@@ -1,9 +1,12 @@
 # dexclub-cli
 
 `dexclub-cli` 是一个面向 `dex / apk / Android 资源` 的 Kotlin 多模块项目。
-它提供一套围绕工作区的 CLI，用来做 dex 查询、方法检查、代码导出以及 Android 资源解析。
+它当前同时提供：
 
-当前仓库包含三个核心模块：
+- 一套围绕工作区的 CLI，用来做 dex 查询、方法检查、代码导出以及 Android 资源解析
+- 一套面向 AI/agent 的 MCP server，用来把同一批能力以工具调用方式暴露给上层编排
+
+当前仓库包含四个核心模块：
 
 - `cli`
   命令行入口，负责参数解析、命令分发、结果渲染与退出码
@@ -11,6 +14,8 @@
   稳定能力边界，负责 workspace、dex 查询/导出、resource 解析
 - `dexkit`
   面向 KMP 的 DexKit 包装层
+- `mcp`
+  HTTP MCP server，负责把 `core` 能力暴露成 AI 可调用工具面
 
 ## 当前能力
 
@@ -26,6 +31,7 @@
 - 读取 `resources.arsc`
 - 解码二进制 XML
 - 列出、解析、搜索资源条目
+- 通过 MCP 暴露 target session、dex 查询、方法检查、代码导出、manifest 与资源相关工具
 
 ## 仓库结构
 
@@ -35,6 +41,10 @@
   当前能力库模块
 - `dexkit/`
   KMP DexKit 包装层
+- `mcp/`
+  MCP server 模块
+- `skills/`
+  仓库内维护的 Codex skill 副本
 - `dexkit/vendor/DexKit/`
   vendored 上游 DexKit
 - `dexkit/vendor/libcxx-prefab/`
@@ -83,10 +93,10 @@ cd dexkit/vendor/libcxx-prefab
 ./gradlew :dexkit:assembleAndroidMain
 ```
 
-编译 `core` 和 `cli`：
+编译 `core / cli / mcp`：
 
 ```bash
-./gradlew :core:compileKotlinJvm :cli:compileKotlin
+./gradlew :core:compileKotlinJvm :cli:compileKotlin :mcp:compileKotlin
 ```
 
 运行测试：
@@ -94,7 +104,10 @@ cd dexkit/vendor/libcxx-prefab
 ```bash
 ./gradlew :core:jvmTest
 ./gradlew :cli:test
+./gradlew :mcp:test
 ```
+
+## 打包 CLI
 
 打包 fat jar：
 
@@ -106,6 +119,14 @@ cd dexkit/vendor/libcxx-prefab
 
 ```bash
 ./gradlew :cli:installShadowDist :cli:shadowDistZip
+```
+
+## 打包 MCP
+
+生成 MCP 分发目录：
+
+```bash
+./gradlew :mcp:installDist
 ```
 
 ## 运行 CLI
@@ -145,6 +166,51 @@ DexKit native 运行提示：
 
 - fat jar 分发场景下，通常只需把 DexKit native 动态库放在 `dexclub-cli-all.jar` 同目录
 - 如果不是通过 fat jar 运行，则可以通过 native 文件路径或 native 目录显式指定，也可以通过环境变量传入，或确保其位于 `java.library.path` 可见范围内
+
+## 运行 MCP
+
+当前 `mcp` 模块提供一个基于 HTTP 的 MCP server，默认监听：
+
+- `host = 127.0.0.1`
+- `port = 8787`
+- `path = /mcp`
+
+Windows PowerShell：
+
+```powershell
+$env:DEXCLUB_MCP_PORT="8787"
+.\mcp\build\install\mcp\bin\mcp.bat
+```
+
+运行参数可通过环境变量调整：
+
+- `DEXCLUB_MCP_HOST`
+- `DEXCLUB_MCP_PORT`
+- `DEXCLUB_MCP_PATH`
+- `DEXCLUB_MCP_DEBUG`
+
+说明：
+
+- `mcp` 是面向 Codex / agent 的工具服务，不是交互式 CLI
+- 正常启动后通常不会持续输出内容；仅在 `DEXCLUB_MCP_DEBUG=true` 时打印 HTTP 请求/响应调试日志
+- `mcp` 默认依赖 DexKit native 动态库位于分发目录的 `lib/` 下
+
+## Skills
+
+仓库当前也维护面向 Codex 的 skill 副本，位于：
+
+- `skills/`
+
+当前主要 skill：
+
+- `dexclub-analysis`
+  通过 `mcp__dexclub__` 驱动 APK / Dex / manifest / resources 分析
+
+说明：
+
+- 仓库内 `skills/` 是版本化源码，不一定会被当前机器上的 Codex 自动发现
+- 如果需要在本机 Codex 中实际触发，通常还需要同步到 `$CODEX_HOME/skills`
+- 具体说明见 [skills/README.md](D:/Code/My/Github/dexclub-cli/skills/README.md)
 
 ## 工作区模型
 
@@ -239,6 +305,18 @@ java -jar cli/build/libs/dexclub-cli-all.jar get-res-value /path/to/workdir --id
 
 仓库当前提供：
 
+- [.github/workflows/build-native.yml](.github/workflows/build-native.yml)
 - [.github/workflows/build-cli.yml](.github/workflows/build-cli.yml)
+- [.github/workflows/build-mcp.yml](.github/workflows/build-mcp.yml)
+- [.github/workflows/build-packages.yml](.github/workflows/build-packages.yml)
 
-用途是按平台构建 CLI 分发产物，并在 tag 构建时上传发布附件。
+职责划分如下：
+
+- `build-native.yml`
+  构建 DexKit native 产物
+- `build-cli.yml`
+  消费 native 产物并打包 CLI 分发物
+- `build-mcp.yml`
+  消费 native 产物并打包 MCP 分发物
+- `build-packages.yml`
+  统一驱动 native、CLI、MCP 构建，并在 tag 下统一上传 release 附件

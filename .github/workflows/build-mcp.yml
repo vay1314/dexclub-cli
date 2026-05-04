@@ -189,10 +189,11 @@ jobs:
           }
 
           $artifactDir = Join-Path $PWD "artifacts"
-          $packageDir = Join-Path $artifactDir "package"
+          $packageDir = Join-Path $PWD ".ci/package"
           if (Test-Path $packageDir) {
             Remove-Item -Recurse -Force $packageDir
           }
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
           New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
 
           $targetBaseName = "dexclub-mcp-${{ matrix.os_name }}-${{ matrix.arch }}"
@@ -216,5 +217,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dexclub-mcp-${{ matrix.os_name }}-${{ matrix.arch }}
-          path: artifacts/
+          path: |
+            artifacts/dexclub-mcp-${{ matrix.os_name }}-${{ matrix.arch }}.zip
+            artifacts/dexclub-mcp-${{ matrix.os_name }}-${{ matrix.arch }}.sha256
           if-no-files-found: error
