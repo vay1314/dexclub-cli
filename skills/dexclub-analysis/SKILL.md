@@ -1,13 +1,13 @@
 ---
 name: dexclub-analysis
-description: Use when Codex needs to analyze APK, Dex, manifest, resources, classes, or methods through dexclub MCP, especially for black-box Android reverse-engineering, feature location, implementation tracing, and competitor analysis. Requires `mcp__dexclub__`; if dexclub MCP is unavailable, do not use this skill.
+description: Use when Codex needs to analyze APK, Dex, manifest, resources, classes, or methods through dexclub MCP, especially for black-box Android reverse-engineering, feature location, implementation tracing, and competitor analysis. This skill runs only when `mcp__dexclub__` is available at execution time.
 ---
 
 # DexClub Analysis
 
 ## Overview
 
-Use this skill to drive `mcp__dexclub__` as the primary analysis surface for APK/Dex/manifest/resource inspection. Treat dexclub MCP as mandatory: if it is unavailable, stop early and tell the user the skill cannot proceed until dexclub MCP is connected.
+Use this skill to drive `mcp__dexclub__` as the primary analysis surface for APK/Dex/manifest/resource inspection. Treat dexclub MCP as a runtime prerequisite: when the skill is actually invoked, if `mcp__dexclub__` is unavailable, stop early and tell the user the skill cannot proceed until dexclub MCP is connected.
 
 ## Hard Gate
 

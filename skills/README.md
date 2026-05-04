@@ -18,9 +18,9 @@
 `dexclub-analysis` 不是独立运行的本地脚本，它依赖：
 
 - Codex skill 机制
-- `mcp__dexclub__` 已在当前 Codex 环境中可用
+- 在 skill 实际执行时，`mcp__dexclub__` 已在当前 Codex 环境中可用
 
-若 dexclub MCP 不可用，skill 应停止并提示用户先连接或启动 dexclub MCP server，而不是静默回退到 shell 或 CLI。
+skill 可以被 Codex 正常发现；但在真正执行前，如果 dexclub MCP 不可用，skill 应停止并提示用户先连接或启动 dexclub MCP server，而不是静默回退到 shell 或 CLI。
 
 ## 仓库内 skill 与运行时 skill
 
