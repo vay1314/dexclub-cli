@@ -321,3 +321,24 @@ java -jar cli/build/libs/dexclub-cli-all.jar get-res-value /path/to/workdir --id
   消费 native 产物并打包 MCP 分发物
 - `build-packages.yml`
   统一驱动 native、CLI、MCP 构建，并在 tag 下统一上传 release 附件
+
+## License
+
+[GNU General Public License v3.0](LICENSE)
+
+```text
+Copyright (C) 2024  Gang
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+```
